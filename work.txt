@@ -1,0 +1,127 @@
+     1 package main
+     2
+     3 import (
+     4     "database/sql"
+     5     "encoding/json" // JSON形式を扱うためのパッケージ
+     6     "fmt"
+     7     "log"
+     8     "net/http" // Webサーバー機能を提供するパッケージ
+     9     "time"
+    10
+    11     // modernc.org/sqlite は純粋なGo言語で実装されたSQLiteドライバです。
+    12     // CGO（C言語との連携）が不要なため、Alpine Linuxなどの軽量環境でも
+    13     // そのまま動くシングルバイナリが作れます。
+    14     _ "modernc.org/sqlite"
+    15 )
+    16
+    17 // Bookmark 構造体：ブックマークのデータをプログラム内で扱うための入れ物です。
+    18 // `json:"..."` という記述（タグ）は、JSON形式にする際の名前を指定しています。
+    19 type Bookmark struct {
+    20     ID          int       `json:"id"`
+    21     URL         string    `json:"url"`
+    22     Title       string    `json:"title"`
+    23     Description string    `json:"description"`
+    24     CreatedAt   time.Time `json:"created_at"`
+    25 }
+    26
+    27 // データベースの接続を保持するグローバル変数です。
+    28 var db *sql.DB
+    29
+    30 func main() {
+    31     var err error
+    32     // 1. データベースファイル（shirushi.db）を開きます。
+    33     db, err = sql.Open("sqlite", "./shirushi.db")
+    34     if err != nil {
+    35         log.Fatal("データベース接続エラー:", err)
+    36     }
+    37     defer db.Close()
+    38
+    39     // 2. テーブルが存在しない場合は作成します。
+    40     createTable()
+    41
+    42     // 3. APIのルート（住所）と、それぞれの処理（関数）を紐付けます。
+    43     // Go 1.22からの新機能で、"GET /..." のようにHTTPメソッドを指定できます。
+    44     http.HandleFunc("GET /api/bookmarks", handleGetBookmarks)
+    45     http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
+    46
+    47     fmt.Println("サーバーを起動しました: http://localhost:8080")
+    48     fmt.Println("API一覧を確認する: http://localhost:8080/api/bookmarks")
+    49
+    50     // 4. 指定したポートでWebサーバーを起動し、待ち受け状態にします。
+    51     if err := http.ListenAndServe(":8080", nil); err != nil {
+    52         log.Fatal("サーバー起動エラー:", err)
+    53     }
+    54 }
+    55
+    56 // createTable：ブックマーク保存用のテーブルを作成する関数です。
+    57 func createTable() {
+    58     query := `
+    59     CREATE TABLE IF NOT EXISTS bookmarks (
+    60         id INTEGER PRIMARY KEY AUTOINCREMENT,
+    61         url TEXT NOT NULL,
+    62         title TEXT,
+    63         description TEXT,
+    64         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    65     );`
+    66     _, err := db.Exec(query)
+    67     if err != nil {
+    68         log.Fatal("テーブル作成エラー:", err)
+    69     }
+    70 }
+    71
+    72 // handleGetBookmarks：登録されているブックマークを一覧で返すAPIです。
+    73 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
+    74     // データベースから全てのデータを取得します。
+    75     rows, err := db.Query("SELECT id, url, title, description, created_at FROM bookmarks ORDER BY id DESC")
+    76     if err != nil {
+    77         http.Error(w, "データベースエラー", http.StatusInternalServerError)
+    78         return
+    79     }
+    80     defer rows.Close()
+    81
+    82     var bookmarks []Bookmark
+    83     for rows.Next() {
+    84         var b Bookmark
+    85         // データベースの値を構造体にコピーします。
+    86         if err := rows.Scan(&b.ID, &b.URL, &b.Title, &b.Description, &b.CreatedAt); err != nil {
+    87             http.Error(w, "読み取りエラー", http.StatusInternalServerError)
+    88             return
+    89         }
+    90         bookmarks = append(bookmarks, b)
+    91     }
+    92
+    93     // データをJSON形式に変換してブラウザに返します。
+    94     w.Header().Set("Content-Type", "application/json")
+    95     json.NewEncoder(w).Encode(bookmarks)
+    96 }
+    97
+    98 // handleCreateBookmark：新しいブックマークを登録するAPIです。
+    99 func handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
+   100     var b Bookmark
+   101     // ブラウザから送られてきたJSONを読み取り、構造体に変換します。
+   102     if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+   103         http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
+   104         return
+   105     }
+   106
+   107     // URLが空の場合はエラーにします。
+   108     if b.URL == "" {
+   109         http.Error(w, "URLは必須です", http.StatusBadRequest)
+   110         return
+   111     }
+   112
+   113     // データベースに保存します。
+   114     query := `INSERT INTO bookmarks (url, title, description) VALUES (?, ?, ?);`
+   115     result, err := db.Exec(query, b.URL, b.Title, b.Description)
+   116     if err != nil {
+   117         http.Error(w, "保存エラー", http.StatusInternalServerError)
+   118         return
+   119     }
+   120
+   121     // 自動採番されたIDを取得してセットします。
+   122     id, _ := result.LastInsertId()
+   123     b.ID = int(id)
+   124     b.CreatedAt = time.Now()
+   125
+   126     // 成功（201 Created）を返し、登録されたデータをJSONで返信します。
+   127     w.Header().Set("Content-Type", "application/json")
