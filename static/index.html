@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shirushi</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 24px;
+    }
+
+    /* 登録フォームのスタイル */
+    form {
+      background: #fff;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    input, textarea {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 1rem;
+      width: 100%;
+    }
+
+    button {
+      padding: 8px 16px;
+      background: #333;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      align-self: flex-start;
+    }
+
+    button:hover {
+      background: #555;
+    }
+
+    /* ブックマーク一覧のスタイル */
+    #bookmark-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .bookmark-item {
+      background: #fff;
+      padding: 16px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .bookmark-info a {
+      font-size: 1rem;
+      font-weight: bold;
+      color: #0070f3;
+      text-decoration: none;
+    }
+
+    .bookmark-info a:hover {
+      text-decoration: underline;
+    }
+
+    .bookmark-info .description {
+      font-size: 0.875rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .bookmark-info .date {
+      font-size: 0.75rem;
+      color: #999;
+      margin-top: 4px;
+    }
+
+    .delete-btn {
+      background: #e00;
+      flex-shrink: 0;
+      padding: 4px 12px;
+      font-size: 0.875rem;
+    }
+
+    .delete-btn:hover {
+      background: #c00;
+    }
+  </style>
+</head>
+<body>
+  <h1>Shirushi</h1>
+
+  <!-- 登録フォーム -->
+  <form id="bookmark-form">
+    <input type="url" id="input-url" placeholder="URL（必須）" required>
+    <input type="text" id="input-title" placeholder="タイトル">
+    <textarea id="input-description" placeholder="メモ" rows="2"></textarea>
+    <button type="submit">登録</button>
+  </form>
+
+  <!-- ブックマーク一覧 -->
+  <div id="bookmark-list">
+    <p>読み込み中...</p>
+  </div>
+
+  <script>
+    // ページが読み込まれたとき、まず一覧を取得して表示します。
+    document.addEventListener('DOMContentLoaded', () => {
+      loadBookmarks();
+    });
+
+    // GET /api/bookmarks：ブックマーク一覧を取得して画面に表示する関数です。
+    async function loadBookmarks() {
+      const list = document.getElementById('bookmark-list');
+
+      // fetch はブラウザ標準のHTTP通信APIです。
+      // async/await を使うことで、通信完了を待ってから次の処理に進めます。
+      const res = await fetch('/api/bookmarks');
+      const bookmarks = await res.json();
+
+      // 取得したデータが空の場合はメッセージを表示します。
+      if (bookmarks === null || bookmarks.length === 0) {
+        list.innerHTML = '<p>ブックマークはまだありません。</p>';
+        return;
+      }
+
+      // データがある場合は、1件ずつHTMLを生成してリストに表示します。
+      list.innerHTML = bookmarks.map(b => `
+        <div class="bookmark-item" data-id="${b.id}">
+          <div class="bookmark-info">
+            <a href="${b.url}" target="_blank" rel="noopener">${b.title || b.url}</a>
+            <div class="description">${b.description || ''}</div>
+            <div class="date">${new Date(b.created_at).toLocaleDateString('ja-JP')}</div>
+          </div>
+          <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
+        </div>
+      `).join('');
+    }
+
+    // POST /api/bookmarks：フォームの内容を送信して新しいブックマークを登録する関数です。
+    document.getElementById('bookmark-form').addEventListener('submit', async (e) => {
+      // フォームのデフォルト動作（ページリロード）をキャンセルします。
+      e.preventDefault();
+
+      const url   = document.getElementById('input-url').value;
+      const title = document.getElementById('input-title').value;
+      const desc  = document.getElementById('input-description').value;
+
+      const res = await fetch('/api/bookmarks', {
+        method: 'POST',
+        // JSON形式で送ることをサーバーに伝えるヘッダーです。
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, title, description: desc }),
+      });
+
+      if (res.ok) {
+        // 送信成功したらフォームを空にして一覧を再読み込みします。
+        e.target.reset();
+        loadBookmarks();
+      } else {
+        alert('登録に失敗しました');
+      }
+    });
+
+    // DELETE /api/bookmarks/:id：指定したIDのブックマークを削除する関数です。
+    async function deleteBookmark(id) {
+      if (!confirm('削除しますか？')) return;
+
+      const res = await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
+
+      if (res.ok) {
+        loadBookmarks();
+      } else {
+        alert('削除に失敗しました');
+      }
+    }
+  </script>
+</body>
+</html>
