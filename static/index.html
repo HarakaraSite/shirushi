@@ -57,6 +57,76 @@
       background: #555;
     }
 
+    /* タグ入力エリアのスタイル */
+    .tag-input-area {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 6px 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      cursor: text;
+      position: relative;
+    }
+
+    .tag-input-area input {
+      border: none;
+      outline: none;
+      padding: 2px 0;
+      font-size: 0.875rem;
+      width: 120px;
+      flex-grow: 1;
+    }
+
+    /* 選択済みタグのバッジ（フォーム内） */
+    .tag-selected-badge {
+      background: #e8f0fe;
+      color: #1a56db;
+      font-size: 0.8rem;
+      padding: 2px 6px;
+      border-radius: 99px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tag-selected-badge button {
+      background: none;
+      color: #1a56db;
+      border: none;
+      padding: 0;
+      font-size: 0.9rem;
+      cursor: pointer;
+      line-height: 1;
+      align-self: auto;
+    }
+
+    /* ドロップダウン候補リストのスタイル */
+    .tag-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-top: 2px;
+      z-index: 10;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .tag-dropdown-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .tag-dropdown-item:hover {
+      background: #f0f4ff;
+    }
+
     /* ブックマーク一覧のスタイル */
     #bookmark-list {
       display: flex;
@@ -85,16 +155,38 @@
       text-decoration: underline;
     }
 
+    .bookmark-info .author {
+      font-size: 0.875rem;
+      color: #888;
+      margin-top: 2px;
+    }
+
     .bookmark-info .description {
       font-size: 0.875rem;
       color: #666;
       margin-top: 4px;
     }
 
+    /* タグバッジのスタイル */
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .tag-badge {
+      background: #e8f0fe;
+      color: #1a56db;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
     .bookmark-info .date {
       font-size: 0.75rem;
       color: #999;
-      margin-top: 4px;
+      margin-top: 6px;
     }
 
     .delete-btn {
@@ -116,7 +208,15 @@
   <form id="bookmark-form">
     <input type="url" id="input-url" placeholder="URL（必須）" required>
     <input type="text" id="input-title" placeholder="タイトル">
-    <textarea id="input-description" placeholder="メモ" rows="2"></textarea>
+    <input type="text" id="input-author" placeholder="著者">
+    <textarea id="input-excerpt" placeholder="メモ・抜粋" rows="2"></textarea>
+    <!-- タグ入力エリア（オートコンプリート方式） -->
+    <div class="tag-input-area" id="tag-input-area" onclick="document.getElementById('tag-input').focus()">
+      <!-- 選択済みタグのバッジがここに追加されます -->
+      <input type="text" id="tag-input" placeholder="タグを入力..." autocomplete="off">
+      <!-- ドロップダウン候補リスト -->
+      <div class="tag-dropdown" id="tag-dropdown" style="display:none;"></div>
+    </div>
     <button type="submit">登録</button>
   </form>
 
@@ -126,32 +226,45 @@
   </div>
 
   <script>
-    // ページが読み込まれたとき、まず一覧を取得して表示します。
-    document.addEventListener('DOMContentLoaded', () => {
-      loadBookmarks();
+    // 全タグと、フォームで選択中のタグを管理する変数です。
+    let allTags = [];
+    let selectedTags = []; // 選択中のタグ: [{id, name}, ...]
+
+    // ページ読み込み時にタグと一覧を取得します。
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadTags();
+      await loadBookmarks();
+      setupTagInput();
     });
 
-    // GET /api/bookmarks：ブックマーク一覧を取得して画面に表示する関数です。
+    // GET /api/tags：タグ一覧を取得してメモリに保持します。
+    async function loadTags() {
+      const res = await fetch('/api/tags');
+      allTags = await res.json() ?? [];
+    }
+
+    // GET /api/bookmarks：ブックマーク一覧を取得して画面に表示します。
     async function loadBookmarks() {
       const list = document.getElementById('bookmark-list');
-
-      // fetch はブラウザ標準のHTTP通信APIです。
-      // async/await を使うことで、通信完了を待ってから次の処理に進めます。
       const res = await fetch('/api/bookmarks');
       const bookmarks = await res.json();
 
-      // 取得したデータが空の場合はメッセージを表示します。
       if (bookmarks === null || bookmarks.length === 0) {
         list.innerHTML = '<p>ブックマークはまだありません。</p>';
         return;
       }
 
-      // データがある場合は、1件ずつHTMLを生成してリストに表示します。
       list.innerHTML = bookmarks.map(b => `
         <div class="bookmark-item" data-id="${b.id}">
           <div class="bookmark-info">
             <a href="${b.url}" target="_blank" rel="noopener">${b.title || b.url}</a>
-            <div class="description">${b.description || ''}</div>
+            ${b.author ? `<div class="author">${b.author}</div>` : ''}
+            ${b.excerpt ? `<div class="description">${b.excerpt}</div>` : ''}
+            ${b.tags && b.tags.length > 0 ? `
+              <div class="tag-list">
+                ${b.tags.map(t => `<span class="tag-badge">${t.name}</span>`).join('')}
+              </div>
+            ` : ''}
             <div class="date">${new Date(b.created_at).toLocaleDateString('ja-JP')}</div>
           </div>
           <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
@@ -159,25 +272,131 @@
       `).join('');
     }
 
-    // POST /api/bookmarks：フォームの内容を送信して新しいブックマークを登録する関数です。
+    // タグ入力のオートコンプリート機能をセットアップします。
+    function setupTagInput() {
+      const input    = document.getElementById('tag-input');
+      const dropdown = document.getElementById('tag-dropdown');
+
+      // 入力のたびに候補を絞り込んでドロップダウンに表示します。
+      input.addEventListener('input', () => {
+        const query = input.value.trim().toLowerCase();
+
+        // 入力が空なら候補を閉じます。
+        if (!query) {
+          dropdown.style.display = 'none';
+          return;
+        }
+
+        // 入力に部分一致するタグを絞り込みます。
+        // すでに選択済みのタグは候補から除外します。
+        const selectedIds = selectedTags.map(t => t.id);
+        const filtered = allTags.filter(t =>
+          t.name.toLowerCase().includes(query) && !selectedIds.includes(t.id)
+        );
+
+        if (filtered.length === 0) {
+          dropdown.style.display = 'none';
+          return;
+        }
+
+        // 候補をドロップダウンに表示します。
+        dropdown.innerHTML = filtered.map(t =>
+          `<div class="tag-dropdown-item" onclick="selectTag(${t.id}, '${t.name}')">${t.name}</div>`
+        ).join('');
+        dropdown.style.display = 'block';
+      });
+
+      // 入力欄の外をクリックしたらドロップダウンを閉じます。
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#tag-input-area')) {
+          dropdown.style.display = 'none';
+        }
+      });
+    }
+
+    // タグを選択したときの処理です。バッジを追加して入力欄をクリアします。
+    function selectTag(id, name) {
+      selectedTags.push({ id, name });
+      renderSelectedTags();
+      document.getElementById('tag-input').value = '';
+      document.getElementById('tag-dropdown').style.display = 'none';
+    }
+
+    // 選択済みタグのバッジを再描画します。
+    function renderSelectedTags() {
+      const area  = document.getElementById('tag-input-area');
+      const input = document.getElementById('tag-input');
+
+      // 既存のバッジを削除してから再生成します。
+      area.querySelectorAll('.tag-selected-badge').forEach(el => el.remove());
+
+      // 選択済みタグのバッジを input の前に挿入します。
+      selectedTags.forEach(t => {
+        const badge = document.createElement('span');
+        badge.className = 'tag-selected-badge';
+        badge.innerHTML = `${t.name}<button type="button" onclick="removeTag(${t.id})">×</button>`;
+        area.insertBefore(badge, input);
+      });
+    }
+
+    // バッジの × ボタンで選択済みタグを取り消します。
+    function removeTag(id) {
+      selectedTags = selectedTags.filter(t => t.id !== id);
+      renderSelectedTags();
+    }
+
+    // POST /api/fetch-metadata：URLからメタデータを自動取得してフォームに入力します。
+    document.getElementById('input-url').addEventListener('blur', async () => {
+      const url = document.getElementById('input-url').value.trim();
+      if (!url) return;
+
+      // タイトルがすでに入力済みの場合は上書きしません。
+      const titleInput = document.getElementById('input-title');
+      if (titleInput.value.trim()) return;
+
+      // 取得中であることをプレースホルダーで伝えます。
+      titleInput.placeholder = '取得中...';
+
+      const res = await fetch('/api/fetch-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      titleInput.placeholder = 'タイトル';
+      if (!res.ok) return;
+
+      const meta = await res.json();
+      // 各フィールドが空のときだけ自動入力します（手入力を上書きしない）。
+      if (meta.title   && !titleInput.value)
+        titleInput.value = meta.title;
+      if (meta.excerpt && !document.getElementById('input-excerpt').value)
+        document.getElementById('input-excerpt').value = meta.excerpt;
+      if (meta.author  && !document.getElementById('input-author').value)
+        document.getElementById('input-author').value = meta.author;
+    });
+
+    // POST /api/bookmarks：フォームの内容を送信して新しいブックマークを登録します。
     document.getElementById('bookmark-form').addEventListener('submit', async (e) => {
-      // フォームのデフォルト動作（ページリロード）をキャンセルします。
       e.preventDefault();
 
-      const url   = document.getElementById('input-url').value;
-      const title = document.getElementById('input-title').value;
-      const desc  = document.getElementById('input-description').value;
+      const url     = document.getElementById('input-url').value;
+      const title   = document.getElementById('input-title').value;
+      const author  = document.getElementById('input-author').value;
+      const excerpt = document.getElementById('input-excerpt').value;
+      // selectedTags をそのまま送信します（[{id, name}, ...]）。
+      const tags = selectedTags.map(t => ({ id: t.id }));
 
       const res = await fetch('/api/bookmarks', {
         method: 'POST',
-        // JSON形式で送ることをサーバーに伝えるヘッダーです。
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, title, description: desc }),
+        body: JSON.stringify({ url, title, author, excerpt, tags }),
       });
 
       if (res.ok) {
-        // 送信成功したらフォームを空にして一覧を再読み込みします。
         e.target.reset();
+        selectedTags = [];
+        renderSelectedTags();
         loadBookmarks();
       } else {
         alert('登録に失敗しました');
@@ -187,9 +406,7 @@
     // DELETE /api/bookmarks/:id：指定したIDのブックマークを削除する関数です。
     async function deleteBookmark(id) {
       if (!confirm('削除しますか？')) return;
-
       const res = await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
-
       if (res.ok) {
         loadBookmarks();
       } else {

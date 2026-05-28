@@ -73,7 +73,7 @@ func TestHandleGetBookmarks_WithData(t *testing.T) {
 
 	// テスト用データを直接DBに挿入します。
 	_, err := db.Exec(
-		`INSERT INTO bookmarks (url, title, description) VALUES (?, ?, ?)`,
+		`INSERT INTO bookmarks (url, title, excerpt) VALUES (?, ?, ?)`,
 		"https://example.com", "テスト", "説明文",
 	)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestHandleDeleteBookmark_Success(t *testing.T) {
 
 	// 削除対象のデータを1件挿入して、採番されたIDを取得します。
 	result, err := db.Exec(
-		`INSERT INTO bookmarks (url, title, description) VALUES (?, ?, ?)`,
+		`INSERT INTO bookmarks (url, title, excerpt) VALUES (?, ?, ?)`,
 		"https://example.com", "削除テスト", "",
 	)
 	if err != nil {
@@ -156,7 +156,7 @@ func TestHandleCreateBookmark_Success(t *testing.T) {
 	setupTestDB(t)
 
 	// strings.NewReader でJSON文字列をリクエストボディとして渡します。
-	body := strings.NewReader(`{"url":"https://example.com","title":"テスト","description":"説明"}`)
+	body := strings.NewReader(`{"url":"https://example.com","title":"テスト","excerpt":"説明"}`)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/bookmarks", body)
 
@@ -202,7 +202,7 @@ func TestHandleUpdateBookmark_Success(t *testing.T) {
 
 	// 更新対象のデータを1件挿入します。
 	result, err := db.Exec(
-		`INSERT INTO bookmarks (url, title, description) VALUES (?, ?, ?)`,
+		`INSERT INTO bookmarks (url, title, excerpt) VALUES (?, ?, ?)`,
 		"https://before.com", "更新前", "",
 	)
 	if err != nil {
@@ -210,7 +210,7 @@ func TestHandleUpdateBookmark_Success(t *testing.T) {
 	}
 	id, _ := result.LastInsertId()
 
-	body := strings.NewReader(`{"url":"https://after.com","title":"更新後","description":"メモ"}`)
+	body := strings.NewReader(`{"url":"https://after.com","title":"更新後","excerpt":"メモ"}`)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/bookmarks/%d", id), body)
 	r.SetPathValue("id", fmt.Sprintf("%d", id))
