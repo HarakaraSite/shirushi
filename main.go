@@ -440,18 +440,47 @@ func migrateAddUniqueURL() {
 }
 
 // handleGetBookmarks：登録されているブックマークを一覧で返すAPIです。
-// 各ブックマークに紐付いたタグも一緒に返します。
+// クエリパラメータ:
+//   ?q=keyword  タイトル・URL・excerptで絞り込み検索
+//   ?limit=N    取得件数上限（デフォルト100、最大500）
 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
-	// データベースから全てのデータを取得します。
-	rows, err := db.Query(`
-		SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-		FROM bookmarks
-		ORDER BY id DESC`)
+	// r.URL.Query().Get() でクエリパラメータを取得します。
+	// 例: /api/bookmarks?q=go → "go" が返ります。
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	// 件数上限を取得します。指定なし・不正値はデフォルト100件にします。
+	limit := 100
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+
+	var rows *sql.Rows
+	var err error
+
+	if q == "" {
+		// 検索ワードなし：新しい順に上限件数分取得します。
+		// LIMIT ? で取得件数を絞ることで、大量データでも高速に返せます。
+		rows, err = db.Query(`
+			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+			FROM bookmarks
+			ORDER BY id DESC
+			LIMIT ?`, limit)
+	} else {
+		// 検索ワードあり：LIKE で部分一致検索します。
+		// % は「任意の文字列」を意味するワイルドカードです。
+		like := "%" + q + "%"
+		rows, err = db.Query(`
+			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+			FROM bookmarks
+			WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?
+			ORDER BY id DESC
+			LIMIT ?`,
+			like, like, like, limit)
+	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
 	// まず全ブックマークを取得してrowsを閉じます。
 	// rowsが開いたまま別のクエリを実行するとSQLiteでエラーになることがあるためです。
@@ -462,6 +491,7 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 			&b.ID, &b.URL, &b.Title, &b.Excerpt, &b.Author,
 			&b.Public, &b.HasContent, &b.ImageURL, &b.CreatedAt, &b.ModifiedAt,
 		); err != nil {
+			rows.Close()
 			http.Error(w, "読み取りエラー", http.StatusInternalServerError)
 			return
 		}
@@ -469,13 +499,65 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close() // タグ取得の前に明示的に閉じます。
 
-	// rowsを閉じてから各ブックマークのタグを取得します。
-	for i := range bookmarks {
-		bookmarks[i].Tags, err = getTagsByBookmarkID(bookmarks[i].ID)
+	// N+1クエリ問題を避けるため、タグを1回のSQLで一括取得します。
+	// NG例（N+1）: ブックマークが1000件あると1001回クエリが走る
+	//   for i := range bookmarks { bookmarks[i].Tags = getTagsByBookmarkID(...) }
+	// OK例（2クエリ固定）: 全ブックマークIDをまとめてINで渡す
+	if len(bookmarks) > 0 {
+		// 取得したブックマークのIDをスライスにまとめます。
+		ids := make([]int, len(bookmarks))
+		for i, b := range bookmarks {
+			ids[i] = b.ID
+		}
+
+		// IDをマップのキーとして、ブックマークの添字を素早く引けるようにします。
+		// map[bookmarkID] = bookmarksスライスの添字
+		idxByID := make(map[int]int, len(bookmarks))
+		for i, b := range bookmarks {
+			idxByID[b.ID] = i
+		}
+
+		// SQLの IN句 に渡すプレースホルダー（?,?,?...）を動的に生成します。
+		placeholders := strings.Repeat("?,", len(ids))
+		placeholders = placeholders[:len(placeholders)-1] // 末尾のカンマを除去
+
+		// args は interface{} のスライスとして各IDを渡す必要があります。
+		args := make([]interface{}, len(ids))
+		for i, id := range ids {
+			args[i] = id
+		}
+
+		// 対象ブックマークのタグを1回のJOINクエリでまとめて取得します。
+		tagRows, err := db.Query(fmt.Sprintf(`
+			SELECT bt.bookmark_id, t.id, t.name
+			FROM tags t
+			INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
+			WHERE bt.bookmark_id IN (%s)
+			ORDER BY t.name ASC`, placeholders), args...)
 		if err != nil {
 			http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
 			return
 		}
+		defer tagRows.Close()
+
+		// 取得したタグ行を対応するブックマークに割り当てます。
+		for tagRows.Next() {
+			var bookmarkID int
+			var tag Tag
+			if err := tagRows.Scan(&bookmarkID, &tag.ID, &tag.Name); err != nil {
+				http.Error(w, "タグ読み取りエラー", http.StatusInternalServerError)
+				return
+			}
+			// idxByID でブックマークの位置をO(1)で特定してタグを追加します。
+			if idx, ok := idxByID[bookmarkID]; ok {
+				bookmarks[idx].Tags = append(bookmarks[idx].Tags, tag)
+			}
+		}
+	}
+
+	// nilスライスをそのままJSONにすると null になるため、空スライスで初期化します。
+	if bookmarks == nil {
+		bookmarks = []Bookmark{}
 	}
 
 	// データをJSON形式に変換してブラウザに返します。

@@ -214,7 +214,7 @@
 
   <!-- メイン画面（認証済みのときだけ表示） -->
   <div id="main-screen" style="display:none;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h1 style="margin-bottom:0;">Shirushi</h1>
       <div style="display:flex; gap:8px; align-items:center;">
         <a href="/api/export" download="shirushi-bookmarks.html">
@@ -227,6 +227,14 @@
         <button type="button" onclick="logout()" style="background:#888;">ログアウト</button>
       </div>
     </div>
+
+    <!-- 検索バー -->
+    <input
+      type="search"
+      id="search-input"
+      placeholder="タイトル・URL・メモで検索..."
+      style="width:100%; margin-bottom:16px;"
+    >
 
     <!-- 登録フォーム -->
     <form id="bookmark-form">
@@ -308,6 +316,17 @@
       showLoginScreen();
     }
 
+    // 検索バーの入力イベントです。
+    // debounce（入力が止まって300ms後に実行）することで、
+    // 1文字打つたびにAPIを叩かず、サーバーの負荷を抑えます。
+    let searchTimer = null;
+    document.getElementById('search-input').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        loadBookmarks(e.target.value.trim());
+      }, 300);
+    });
+
     // GET /api/tags：タグ一覧を取得してメモリに保持します。
     async function loadTags() {
       const res = await fetch('/api/tags');
@@ -315,9 +334,11 @@
     }
 
     // GET /api/bookmarks：ブックマーク一覧を取得して画面に表示します。
-    async function loadBookmarks() {
+    // q を渡すと ?q=keyword でサーバー側検索を行います。
+    async function loadBookmarks(q = '') {
       const list = document.getElementById('bookmark-list');
-      const res = await fetch('/api/bookmarks');
+      const url = q ? `/api/bookmarks?q=${encodeURIComponent(q)}` : '/api/bookmarks';
+      const res = await fetch(url);
       const bookmarks = await res.json();
 
       if (bookmarks === null || bookmarks.length === 0) {
