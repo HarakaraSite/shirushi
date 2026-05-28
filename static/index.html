@@ -20,18 +20,6 @@
 
     h1 {
       font-size: 1.5rem;
-      margin-bottom: 24px;
-    }
-
-    /* 登録フォームのスタイル */
-    form {
-      background: #fff;
-      padding: 16px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
     }
 
     input, textarea {
@@ -50,14 +38,60 @@
       border-radius: 4px;
       cursor: pointer;
       font-size: 1rem;
-      align-self: flex-start;
     }
 
     button:hover {
       background: #555;
     }
 
-    /* タグ入力エリアのスタイル */
+    /* ===== モーダル ===== */
+    #modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0; /* top/right/bottom/left すべて 0 */
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* display:none を上書きして flex で表示するためのクラス */
+    #modal-overlay.open {
+      display: flex;
+    }
+
+    #modal-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 480px;
+      max-height: 90vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #modal-box h2 {
+      font-size: 1.1rem;
+    }
+
+    /* モーダル内のボタン行 */
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-cancel {
+      background: #888;
+    }
+
+    .btn-cancel:hover {
+      background: #666;
+    }
+
+    /* ===== タグ入力エリア ===== */
     .tag-input-area {
       border: 1px solid #ccc;
       border-radius: 4px;
@@ -99,10 +133,9 @@
       font-size: 0.9rem;
       cursor: pointer;
       line-height: 1;
-      align-self: auto;
     }
 
-    /* ドロップダウン候補リストのスタイル */
+    /* ドロップダウン候補リスト */
     .tag-dropdown {
       position: absolute;
       top: 100%;
@@ -112,7 +145,7 @@
       border: 1px solid #ccc;
       border-radius: 4px;
       margin-top: 2px;
-      z-index: 10;
+      z-index: 200;
       max-height: 160px;
       overflow-y: auto;
     }
@@ -127,7 +160,7 @@
       background: #f0f4ff;
     }
 
-    /* ブックマーク一覧のスタイル */
+    /* ===== ブックマーク一覧 ===== */
     #bookmark-list {
       display: flex;
       flex-direction: column;
@@ -144,30 +177,46 @@
       gap: 12px;
     }
 
-    .bookmark-info a {
+    .bookmark-info {
+      flex: 1;
+      min-width: 0; /* overflow: hidden が効くようにする */
+    }
+
+    /* タイトル */
+    .bookmark-info .title-link {
       font-size: 1rem;
       font-weight: bold;
       color: #0070f3;
       text-decoration: none;
     }
 
-    .bookmark-info a:hover {
+    .bookmark-info .title-link:hover {
       text-decoration: underline;
+    }
+
+    /* URLをタイトルの下に小さく表示（Task #4） */
+    .bookmark-info .bookmark-url {
+      font-size: 0.75rem;
+      color: #999;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis; /* 長いURLは「...」で省略 */
     }
 
     .bookmark-info .author {
       font-size: 0.875rem;
       color: #888;
-      margin-top: 2px;
+      margin-top: 4px;
     }
 
-    .bookmark-info .description {
+    .bookmark-info .excerpt {
       font-size: 0.875rem;
       color: #666;
       margin-top: 4px;
     }
 
-    /* タグバッジのスタイル */
+    /* タグバッジ */
     .tag-list {
       display: flex;
       flex-wrap: wrap;
@@ -189,9 +238,26 @@
       margin-top: 6px;
     }
 
+    /* カードの操作ボタン群 */
+    .bookmark-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .edit-btn {
+      background: #0070f3;
+      padding: 4px 12px;
+      font-size: 0.875rem;
+    }
+
+    .edit-btn:hover {
+      background: #0058c4;
+    }
+
     .delete-btn {
       background: #e00;
-      flex-shrink: 0;
       padding: 4px 12px;
       font-size: 0.875rem;
     }
@@ -202,7 +268,8 @@
   </style>
 </head>
 <body>
-  <!-- ログイン画面（未認証のときだけ表示） -->
+
+  <!-- ===== ログイン画面 ===== -->
   <div id="login-screen" style="display:none; max-width:320px; margin:80px auto;">
     <h1 style="margin-bottom:24px;">Shirushi</h1>
     <form id="login-form" style="background:#fff; padding:16px; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
@@ -212,11 +279,15 @@
     </form>
   </div>
 
-  <!-- メイン画面（認証済みのときだけ表示） -->
+  <!-- ===== メイン画面 ===== -->
   <div id="main-screen" style="display:none;">
+
+    <!-- ヘッダー -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h1 style="margin-bottom:0;">Shirushi</h1>
+      <h1>Shirushi</h1>
       <div style="display:flex; gap:8px; align-items:center;">
+        <!-- 追加ボタン：クリックでモーダルを「追加モード」で開く -->
+        <button type="button" onclick="openModal()">＋ 追加</button>
         <a href="/api/export" download="shirushi-bookmarks.html">
           <button type="button">エクスポート</button>
         </a>
@@ -236,40 +307,57 @@
       style="width:100%; margin-bottom:16px;"
     >
 
-    <!-- 登録フォーム -->
-    <form id="bookmark-form">
-    <input type="url" id="input-url" placeholder="URL（必須）" required>
-    <input type="text" id="input-title" placeholder="タイトル">
-    <input type="text" id="input-author" placeholder="著者">
-    <textarea id="input-excerpt" placeholder="メモ・抜粋" rows="2"></textarea>
-    <!-- タグ入力エリア（オートコンプリート方式） -->
-    <div class="tag-input-area" id="tag-input-area" onclick="document.getElementById('tag-input').focus()">
-      <!-- 選択済みタグのバッジがここに追加されます -->
-      <input type="text" id="tag-input" placeholder="タグを入力..." autocomplete="off">
-      <!-- ドロップダウン候補リスト -->
-      <div class="tag-dropdown" id="tag-dropdown" style="display:none;"></div>
-    </div>
-    <button type="submit">登録</button>
-  </form>
-
-    <!-- 登録フォームとブックマーク一覧はメイン画面の中に入ります -->
     <!-- ブックマーク一覧 -->
     <div id="bookmark-list">
       <p>読み込み中...</p>
     </div>
-  </div> <!-- #main-screen ここまで -->
+
+  </div><!-- #main-screen ここまで -->
+
+  <!-- ===== モーダル（追加・編集の両方に使い回す） ===== -->
+  <!-- オーバーレイをクリックしたらモーダルを閉じる -->
+  <div id="modal-overlay" onclick="onOverlayClick(event)">
+    <div id="modal-box">
+      <!-- モードに応じてタイトルが変わる -->
+      <h2 id="modal-heading">ブックマークを追加</h2>
+
+      <form id="bookmark-form" style="display:contents;">
+        <input type="url" id="input-url" placeholder="URL（必須）" required>
+        <input type="text" id="input-title" placeholder="タイトル">
+        <input type="text" id="input-author" placeholder="著者">
+        <textarea id="input-excerpt" placeholder="メモ・抜粋" rows="3"></textarea>
+
+        <!-- タグ入力エリア（オートコンプリート方式） -->
+        <div class="tag-input-area" id="tag-input-area" onclick="document.getElementById('tag-input').focus()">
+          <input type="text" id="tag-input" placeholder="タグを入力..." autocomplete="off">
+          <div class="tag-dropdown" id="tag-dropdown" style="display:none;"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="submit" id="modal-submit-btn">登録</button>
+          <button type="button" class="btn-cancel" onclick="closeModal()">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script>
-    let allTags = [];
-    let selectedTags = [];
+    let allTags = [];      // サーバーから取得した全タグ
+    let selectedTags = []; // モーダルフォームで選択中のタグ
+    let editingId = null;  // null = 追加モード、数値 = 編集対象のID
+
+    // ブックマークデータを ID で引けるように保持します。
+    // onclick に JSON.stringify を直接埋め込むと、タイトルや抜粋に含まれる
+    // シングルクォートや特殊文字でHTML属性が壊れるため、この方式を使います。
+    const bookmarkMap = new Map(); // Map<id: number, bookmark: object>
 
     // ページ読み込み時に認証状態を確認します。
     document.addEventListener('DOMContentLoaded', async () => {
       await checkAuth();
     });
 
-    // GET /api/bookmarks で認証状態を確認します。
-    // 401が返ればログイン画面を、200ならメイン画面を表示します。
+    // ===== 認証 =====
+
     async function checkAuth() {
       const res = await fetch('/api/bookmarks');
       if (res.status === 401) {
@@ -292,7 +380,6 @@
       setupTagInput();
     }
 
-    // ログインフォームの送信処理です。
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const password = document.getElementById('input-password').value;
@@ -310,15 +397,14 @@
       }
     });
 
-    // ログアウト処理です。
     async function logout() {
       await fetch('/api/logout', { method: 'POST' });
       showLoginScreen();
     }
 
-    // 検索バーの入力イベントです。
-    // debounce（入力が止まって300ms後に実行）することで、
-    // 1文字打つたびにAPIを叩かず、サーバーの負荷を抑えます。
+    // ===== 検索 =====
+
+    // debounce: 入力が止まって300ms後に検索します。
     let searchTimer = null;
     document.getElementById('search-input').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
@@ -327,139 +413,144 @@
       }, 300);
     });
 
-    // GET /api/tags：タグ一覧を取得してメモリに保持します。
+    // ===== データ取得 =====
+
     async function loadTags() {
       const res = await fetch('/api/tags');
       allTags = await res.json() ?? [];
     }
 
-    // GET /api/bookmarks：ブックマーク一覧を取得して画面に表示します。
-    // q を渡すと ?q=keyword でサーバー側検索を行います。
     async function loadBookmarks(q = '') {
       const list = document.getElementById('bookmark-list');
       const url = q ? `/api/bookmarks?q=${encodeURIComponent(q)}` : '/api/bookmarks';
       const res = await fetch(url);
       const bookmarks = await res.json();
 
-      if (bookmarks === null || bookmarks.length === 0) {
+      if (!bookmarks || bookmarks.length === 0) {
         list.innerHTML = '<p>ブックマークはまだありません。</p>';
         return;
       }
 
+      // 最新のブックマーク一覧で Map を更新します。
+      // これにより、編集ボタン押下時に ID だけで元データを取得できます。
+      bookmarkMap.clear();
+      bookmarks.forEach(b => bookmarkMap.set(b.id, b));
+
       list.innerHTML = bookmarks.map(b => `
         <div class="bookmark-item" data-id="${b.id}">
           <div class="bookmark-info">
-            <a href="${b.url}" target="_blank" rel="noopener">${b.title || b.url}</a>
-            ${b.author ? `<div class="author">${b.author}</div>` : ''}
-            ${b.excerpt ? `<div class="description">${b.excerpt}</div>` : ''}
+            <!-- タイトル -->
+            <a class="title-link" href="${b.url}" target="_blank" rel="noopener">${escapeHtml(b.title || b.url)}</a>
+            <!-- URLをタイトルの下に表示（Task #4） -->
+            <div class="bookmark-url">${escapeHtml(b.url)}</div>
+            ${b.author ? `<div class="author">${escapeHtml(b.author)}</div>` : ''}
+            ${b.excerpt ? `<div class="excerpt">${escapeHtml(b.excerpt)}</div>` : ''}
             ${b.tags && b.tags.length > 0 ? `
               <div class="tag-list">
-                ${b.tags.map(t => `<span class="tag-badge">${t.name}</span>`).join('')}
+                ${b.tags.map(t => `<span class="tag-badge">${escapeHtml(t.name)}</span>`).join('')}
               </div>
             ` : ''}
             <div class="date">${new Date(b.created_at).toLocaleDateString('ja-JP')}</div>
           </div>
-          <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
+          <!-- 編集・削除ボタン：IDだけ渡してデータはMapから取得します -->
+          <div class="bookmark-actions">
+            <button class="edit-btn" onclick="openEditModal(${b.id})">編集</button>
+            <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
+          </div>
         </div>
       `).join('');
     }
 
-    // タグ入力のオートコンプリート機能をセットアップします。
-    function setupTagInput() {
-      const input    = document.getElementById('tag-input');
-      const dropdown = document.getElementById('tag-dropdown');
-
-      // 入力のたびに候補を絞り込んでドロップダウンに表示します。
-      input.addEventListener('input', () => {
-        const query = input.value.trim().toLowerCase();
-
-        // 入力が空なら候補を閉じます。
-        if (!query) {
-          dropdown.style.display = 'none';
-          return;
-        }
-
-        // 入力に部分一致するタグを絞り込みます。
-        // すでに選択済みのタグは候補から除外します。
-        const selectedIds = selectedTags.map(t => t.id);
-        const filtered = allTags.filter(t =>
-          t.name.toLowerCase().includes(query) && !selectedIds.includes(t.id)
-        );
-
-        if (filtered.length === 0) {
-          dropdown.style.display = 'none';
-          return;
-        }
-
-        // 候補をドロップダウンに表示します。
-        dropdown.innerHTML = filtered.map(t =>
-          `<div class="tag-dropdown-item" onclick="selectTag(${t.id}, '${t.name}')">${t.name}</div>`
-        ).join('');
-        dropdown.style.display = 'block';
-      });
-
-      // 入力欄の外をクリックしたらドロップダウンを閉じます。
-      document.addEventListener('click', (e) => {
-        if (!e.target.closest('#tag-input-area')) {
-          dropdown.style.display = 'none';
-        }
-      });
+    // XSS対策：ユーザーデータをHTMLに埋め込む前にエスケープします。
+    // < > & " ' などの特殊文字をHTMLエンティティに変換することで、
+    // 悪意あるスクリプトが実行されるのを防ぎます。
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
-    // タグを選択したときの処理です。バッジを追加して入力欄をクリアします。
-    function selectTag(id, name) {
-      selectedTags.push({ id, name });
+    // ===== モーダル =====
+
+    // 「追加モード」でモーダルを開きます。フォームを空にします。
+    function openModal() {
+      editingId = null;
+      document.getElementById('modal-heading').textContent = 'ブックマークを追加';
+      document.getElementById('modal-submit-btn').textContent = '登録';
+      document.getElementById('bookmark-form').reset();
+      selectedTags = [];
       renderSelectedTags();
-      document.getElementById('tag-input').value = '';
-      document.getElementById('tag-dropdown').style.display = 'none';
+      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('input-url').focus();
     }
 
-    // 選択済みタグのバッジを再描画します。
-    function renderSelectedTags() {
-      const area  = document.getElementById('tag-input-area');
-      const input = document.getElementById('tag-input');
+    // 「編集モード」でモーダルを開きます。既存データをフォームに入れます。
+    // 引数は bookmark の ID です。データは bookmarkMap から取得します。
+    // ※ onclick に JSON.stringify を直接埋め込むと、タイトル・抜粋に含まれる
+    //    シングルクォート等でHTML属性が壊れるため、ID経由でMapを引く方式にしています。
+    function openEditModal(id) {
+      const b = bookmarkMap.get(id);
+      if (!b) return; // 念のため存在チェック
 
-      // 既存のバッジを削除してから再生成します。
-      area.querySelectorAll('.tag-selected-badge').forEach(el => el.remove());
+      editingId = b.id;
+      document.getElementById('modal-heading').textContent = 'ブックマークを編集';
+      document.getElementById('modal-submit-btn').textContent = '更新';
 
-      // 選択済みタグのバッジを input の前に挿入します。
-      selectedTags.forEach(t => {
-        const badge = document.createElement('span');
-        badge.className = 'tag-selected-badge';
-        badge.innerHTML = `${t.name}<button type="button" onclick="removeTag(${t.id})">×</button>`;
-        area.insertBefore(badge, input);
-      });
-    }
+      // フォームに既存の値をセットします。
+      document.getElementById('input-url').value     = b.url     ?? '';
+      document.getElementById('input-title').value   = b.title   ?? '';
+      document.getElementById('input-author').value  = b.author  ?? '';
+      document.getElementById('input-excerpt').value = b.excerpt ?? '';
 
-    // バッジの × ボタンで選択済みタグを取り消します。
-    function removeTag(id) {
-      selectedTags = selectedTags.filter(t => t.id !== id);
+      // 既存のタグを選択済みにします。
+      // b.tags が null の場合（タグなし）は空配列にします。
+      selectedTags = b.tags ? b.tags.map(t => ({ id: t.id, name: t.name })) : [];
       renderSelectedTags();
+
+      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('input-title').focus();
     }
 
-    // POST /api/fetch-metadata：URLからメタデータを自動取得してフォームに入力します。
+    // モーダルを閉じます。
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    // オーバーレイ（背景の暗い部分）をクリックしたときだけ閉じます。
+    // モーダルボックス内のクリックは伝播しますが、ここで除外します。
+    function onOverlayClick(e) {
+      if (e.target === document.getElementById('modal-overlay')) {
+        closeModal();
+      }
+    }
+
+    // ===== フォーム送信 =====
+
+    // URLのblurでメタデータを自動取得します（追加モードのときだけ）。
     document.getElementById('input-url').addEventListener('blur', async () => {
+      // 編集モード（editingId が設定済み）では上書きしません。
+      if (editingId !== null) return;
+
       const url = document.getElementById('input-url').value.trim();
       if (!url) return;
 
-      // タイトルがすでに入力済みの場合は上書きしません。
       const titleInput = document.getElementById('input-title');
-      if (titleInput.value.trim()) return;
+      if (titleInput.value.trim()) return; // タイトルが入力済みなら上書きしない
 
-      // 取得中であることをプレースホルダーで伝えます。
       titleInput.placeholder = '取得中...';
-
       const res = await fetch('/api/fetch-metadata', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       });
-
       titleInput.placeholder = 'タイトル';
       if (!res.ok) return;
 
       const meta = await res.json();
-      // 各フィールドが空のときだけ自動入力します（手入力を上書きしない）。
       if (meta.title   && !titleInput.value)
         titleInput.value = meta.title;
       if (meta.excerpt && !document.getElementById('input-excerpt').value)
@@ -468,44 +559,160 @@
         document.getElementById('input-author').value = meta.author;
     });
 
-    // POST /api/bookmarks：フォームの内容を送信して新しいブックマークを登録します。
+    // フォーム送信：editingId の有無で POST / PUT を切り替えます。
     document.getElementById('bookmark-form').addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      const url     = document.getElementById('input-url').value;
-      const title   = document.getElementById('input-title').value;
-      const author  = document.getElementById('input-author').value;
-      const excerpt = document.getElementById('input-excerpt').value;
-      // selectedTags をそのまま送信します（[{id, name}, ...]）。
-      const tags = selectedTags.map(t => ({ id: t.id }));
+      const payload = {
+        url:     document.getElementById('input-url').value,
+        title:   document.getElementById('input-title').value,
+        author:  document.getElementById('input-author').value,
+        excerpt: document.getElementById('input-excerpt').value,
+        tags:    selectedTags.map(t => ({ id: t.id })),
+      };
 
-      const res = await fetch('/api/bookmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, title, author, excerpt, tags }),
-      });
+      let res;
+      if (editingId === null) {
+        // 追加モード：POST /api/bookmarks
+        res = await fetch('/api/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        // 編集モード：PUT /api/bookmarks/:id
+        res = await fetch(`/api/bookmarks/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (res.ok) {
-        e.target.reset();
-        selectedTags = [];
-        renderSelectedTags();
-        loadBookmarks();
+        closeModal();
+        // 検索ワードを維持したまま一覧を再読み込みします。
+        const q = document.getElementById('search-input').value.trim();
+        await loadBookmarks(q);
       } else {
-        alert('登録に失敗しました');
+        alert(editingId === null ? '登録に失敗しました' : '更新に失敗しました');
       }
     });
 
-    // POST /api/import：Netscape Bookmark形式のHTMLファイルをアップロードしてインポートします。
+    // ===== タグオートコンプリート =====
+
+    function setupTagInput() {
+      const input    = document.getElementById('tag-input');
+      const dropdown = document.getElementById('tag-dropdown');
+
+      // 入力のたびにドロップダウン候補を更新します。
+      input.addEventListener('input', () => {
+        renderTagDropdown(input.value.trim());
+      });
+
+      // Enterキーでタグを確定します。
+      // ドロップダウンに完全一致があれば選択、なければ新規作成します。
+      input.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault(); // フォーム送信を阻止します
+
+        const name = input.value.trim();
+        if (!name) return;
+
+        // すでに選択済みのタグは追加しません。
+        if (selectedTags.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+          input.value = '';
+          dropdown.style.display = 'none';
+          return;
+        }
+
+        // allTags に同名のタグがあれば選択、なければ新規作成します。
+        const existing = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+        if (existing) {
+          selectTag(existing.id, existing.name);
+        } else {
+          // POST /api/tags で新規タグを作成します。
+          const res = await fetch('/api/tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          if (!res.ok) {
+            alert('タグの作成に失敗しました');
+            return;
+          }
+          const newTag = await res.json();
+          // 作成したタグを allTags にも追加して次回以降の候補に出るようにします。
+          allTags.push(newTag);
+          selectTag(newTag.id, newTag.name);
+        }
+      });
+
+      // モーダル外をクリックしたらドロップダウンを閉じます。
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#tag-input-area')) {
+          dropdown.style.display = 'none';
+        }
+      });
+    }
+
+    // タグ候補のドロップダウンを描画します。
+    function renderTagDropdown(query) {
+      const dropdown = document.getElementById('tag-dropdown');
+      if (!query) {
+        dropdown.style.display = 'none';
+        return;
+      }
+
+      const selectedIds = selectedTags.map(t => t.id);
+      const filtered = allTags.filter(t =>
+        t.name.toLowerCase().includes(query.toLowerCase()) && !selectedIds.includes(t.id)
+      );
+
+      if (filtered.length === 0) {
+        // 候補がなくても「Enterで新規作成できる」ヒントを表示します。
+        dropdown.innerHTML = `<div class="tag-dropdown-item" style="color:#888;">Enter で「${escapeHtml(query)}」を新規作成</div>`;
+        dropdown.style.display = 'block';
+        return;
+      }
+
+      dropdown.innerHTML = filtered.map(t =>
+        `<div class="tag-dropdown-item" onclick="selectTag(${t.id}, '${escapeHtml(t.name)}')">${escapeHtml(t.name)}</div>`
+      ).join('');
+      dropdown.style.display = 'block';
+    }
+
+    function selectTag(id, name) {
+      selectedTags.push({ id, name });
+      renderSelectedTags();
+      document.getElementById('tag-input').value = '';
+      document.getElementById('tag-dropdown').style.display = 'none';
+    }
+
+    function renderSelectedTags() {
+      const area  = document.getElementById('tag-input-area');
+      const input = document.getElementById('tag-input');
+      area.querySelectorAll('.tag-selected-badge').forEach(el => el.remove());
+      selectedTags.forEach(t => {
+        const badge = document.createElement('span');
+        badge.className = 'tag-selected-badge';
+        badge.innerHTML = `${escapeHtml(t.name)}<button type="button" onclick="removeTag(${t.id})">×</button>`;
+        area.insertBefore(badge, input);
+      });
+    }
+
+    function removeTag(id) {
+      selectedTags = selectedTags.filter(t => t.id !== id);
+      renderSelectedTags();
+    }
+
+    // ===== インポート・削除 =====
+
     async function importBookmarks(input) {
       const file = input.files[0];
       if (!file) return;
-
-      // FormData はファイルをmultipart/form-data形式で送るための標準APIです。
       const formData = new FormData();
       formData.append('file', file);
-
       const res = await fetch('/api/import', { method: 'POST', body: formData });
-
       if (res.ok) {
         const result = await res.json();
         alert(`インポート完了: ${result.imported}件追加、${result.skipped}件スキップ`);
@@ -513,16 +720,15 @@
       } else {
         alert('インポートに失敗しました');
       }
-      // 同じファイルを再選択できるようにリセットします。
       input.value = '';
     }
 
-    // DELETE /api/bookmarks/:id：指定したIDのブックマークを削除する関数です。
     async function deleteBookmark(id) {
       if (!confirm('削除しますか？')) return;
       const res = await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        loadBookmarks();
+        const q = document.getElementById('search-input').value.trim();
+        loadBookmarks(q);
       } else {
         alert('削除に失敗しました');
       }
