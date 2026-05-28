@@ -1,0 +1,5 @@
+# データベースファイル
+shirushi.db
+
+# Shioriの参照用クローン（サブモジュールではないため除外）
+_refs/shiori/
