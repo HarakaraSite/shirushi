@@ -202,7 +202,20 @@
   </style>
 </head>
 <body>
-  <h1>Shirushi</h1>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+    <h1 style="margin-bottom:0;">Shirushi</h1>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <!-- エクスポートはリンクをクリックするだけでファイルがダウンロードされます -->
+      <a href="/api/export" download="shirushi-bookmarks.html">
+        <button type="button">エクスポート</button>
+      </a>
+      <!-- インポートはファイル選択後に自動でアップロードします -->
+      <label style="cursor:pointer;">
+        <button type="button" onclick="this.parentElement.querySelector('input').click()">インポート</button>
+        <input type="file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
+      </label>
+    </div>
+  </div>
 
   <!-- 登録フォーム -->
   <form id="bookmark-form">
@@ -402,6 +415,28 @@
         alert('登録に失敗しました');
       }
     });
+
+    // POST /api/import：Netscape Bookmark形式のHTMLファイルをアップロードしてインポートします。
+    async function importBookmarks(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      // FormData はファイルをmultipart/form-data形式で送るための標準APIです。
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/import', { method: 'POST', body: formData });
+
+      if (res.ok) {
+        const result = await res.json();
+        alert(`インポート完了: ${result.imported}件追加、${result.skipped}件スキップ`);
+        loadBookmarks();
+      } else {
+        alert('インポートに失敗しました');
+      }
+      // 同じファイルを再選択できるようにリセットします。
+      input.value = '';
+    }
 
     // DELETE /api/bookmarks/:id：指定したIDのブックマークを削除する関数です。
     async function deleteBookmark(id) {

@@ -84,6 +84,10 @@ func main() {
 	// URLからメタデータを取得するAPI
 	http.HandleFunc("POST /api/fetch-metadata", handleFetchMetadata)
 
+	// インポート・エクスポートAPI
+	http.HandleFunc("GET /api/export", handleExport)
+	http.HandleFunc("POST /api/import", handleImport)
+
 	// static/ ディレクトリを埋め込みファイルシステムとして取り出します。
 	// fs.Sub で "static" ディレクトリをルートとして扱えるようにします。
 	// こうすることで "/static/index.html" ではなく "/" でアクセスできます。
@@ -218,6 +222,98 @@ func runMigrations() {
 		if _, err := db.Exec(q); err != nil {
 			log.Fatal("タグテーブル作成エラー:", err)
 		}
+	}
+
+	// url カラムに UNIQUE 制約が付いているか確認します。
+	// PRAGMA index_list でテーブルのインデックス一覧を取得できます。
+	if !hasUniqueURLIndex() {
+		fmt.Println("マイグレーション: url カラムに UNIQUE 制約を追加します")
+		migrateAddUniqueURL()
+		fmt.Println("マイグレーション: UNIQUE 制約を追加しました")
+	}
+}
+
+// hasUniqueURLIndex：bookmarks テーブルの url カラムに UNIQUE インデックスがあるか確認します。
+func hasUniqueURLIndex() bool {
+	// PRAGMA index_list はテーブルのインデックス一覧を返します。
+	rows, err := db.Query("PRAGMA index_list(bookmarks)")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var seq, unique int
+		var name, origin string
+		var partial int
+		rows.Scan(&seq, &name, &unique, &origin, &partial)
+		// unique=1 かつ url カラムのインデックスを探します。
+		if unique == 1 {
+			// そのインデックスが url カラムに対応するか確認します。
+			infoRows, err := db.Query("PRAGMA index_info(" + name + ")")
+			if err != nil {
+				continue
+			}
+			for infoRows.Next() {
+				var rank, cid int
+				var colName string
+				infoRows.Scan(&rank, &cid, &colName)
+				if colName == "url" {
+					infoRows.Close()
+					return true
+				}
+			}
+			infoRows.Close()
+		}
+	}
+	return false
+}
+
+// migrateAddUniqueURL：既存データを保持しながら url カラムに UNIQUE 制約を追加します。
+// SQLite では既存カラムへの制約追加ができないため、テーブルを再作成します。
+// 手順: 新テーブル作成 → データコピー → 旧テーブル削除 → リネーム
+func migrateAddUniqueURL() {
+	// トランザクション内で行うことでエラー時にロールバックできます。
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal("トランザクション開始エラー:", err)
+	}
+
+	queries := []string{
+		// 1. UNIQUE 制約付きの新テーブルを作成します。
+		`CREATE TABLE bookmarks_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            url         TEXT NOT NULL UNIQUE,
+            title       TEXT NOT NULL DEFAULT '',
+            excerpt     TEXT NOT NULL DEFAULT '',
+            author      TEXT NOT NULL DEFAULT '',
+            public      INTEGER NOT NULL DEFAULT 0,
+            has_content BOOLEAN NOT NULL DEFAULT FALSE,
+            image_url   TEXT NOT NULL DEFAULT '',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            modified_at DATETIME DEFAULT NULL
+        )`,
+		// 2. 旧テーブルからデータをコピーします。
+		// URLが重複している場合は先に登録されたものを優先します（INSERT OR IGNORE）。
+		`INSERT OR IGNORE INTO bookmarks_new
+            (id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at)
+         SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+         FROM bookmarks`,
+		// 3. 旧テーブルを削除します。
+		`DROP TABLE bookmarks`,
+		// 4. 新テーブルを正式な名前にリネームします。
+		`ALTER TABLE bookmarks_new RENAME TO bookmarks`,
+	}
+
+	for _, q := range queries {
+		if _, err := tx.Exec(q); err != nil {
+			tx.Rollback()
+			log.Fatal("UNIQUEマイグレーションエラー:", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal("コミットエラー:", err)
 	}
 }
 
@@ -744,4 +840,203 @@ func handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleExport：全ブックマークをNetscape Bookmark形式のHTMLとして返すAPIです。
+// ブラウザの「ブックマークをエクスポート」と同じ形式なので、他のアプリにインポートできます。
+func handleExport(w http.ResponseWriter, r *http.Request) {
+	// タグを含む全ブックマークを取得します。
+	rows, err := db.Query(`
+		SELECT id, url, title, excerpt, created_at
+		FROM bookmarks
+		ORDER BY id ASC`)
+	if err != nil {
+		http.Error(w, "データベースエラー", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type exportItem struct {
+		ID        int
+		URL       string
+		Title     string
+		Excerpt   string
+		CreatedAt time.Time
+		Tags      []Tag
+	}
+
+	var items []exportItem
+	for rows.Next() {
+		var item exportItem
+		if err := rows.Scan(&item.ID, &item.URL, &item.Title, &item.Excerpt, &item.CreatedAt); err != nil {
+			http.Error(w, "読み取りエラー", http.StatusInternalServerError)
+			return
+		}
+		items = append(items, item)
+	}
+	rows.Close()
+
+	// タグを取得します。
+	for i := range items {
+		items[i].Tags, err = getTagsByBookmarkID(items[i].ID)
+		if err != nil {
+			http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Netscape Bookmark形式のHTMLを生成します。
+	// fmt.Fprintf でレスポンスに直接書き込むことで、メモリ効率よく処理できます。
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+	// Content-Disposition でブラウザにファイルとしてダウンロードさせます。
+	w.Header().Set("Content-Disposition", `attachment; filename="shirushi-bookmarks.html"`)
+
+	fmt.Fprintln(w, `<!DOCTYPE NETSCAPE-Bookmark-file-1>`)
+	fmt.Fprintln(w, `<!-- Shirushi によってエクスポートされたブックマーク -->`)
+	fmt.Fprintln(w, `<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">`)
+	fmt.Fprintln(w, `<TITLE>Bookmarks</TITLE>`)
+	fmt.Fprintln(w, `<H1>Bookmarks</H1>`)
+	fmt.Fprintln(w, `<DL><p>`)
+
+	for _, item := range items {
+		// タグをカンマ区切りの文字列に変換します。
+		tagNames := make([]string, len(item.Tags))
+		for i, t := range item.Tags {
+			tagNames[i] = t.Name
+		}
+		tags := strings.Join(tagNames, ",")
+
+		// ADD_DATE は Unix タイムスタンプ（秒）です。
+		addDate := item.CreatedAt.Unix()
+
+		fmt.Fprintf(w, `    <DT><A HREF="%s" ADD_DATE="%d" TAGS="%s">%s</A>`+"\n",
+			item.URL, addDate, tags, item.Title)
+
+		// excerptがある場合は <DD> タグで説明文を追加します。
+		if item.Excerpt != "" {
+			fmt.Fprintf(w, `    <DD>%s`+"\n", item.Excerpt)
+		}
+	}
+
+	fmt.Fprintln(w, `</DL><p>`)
+}
+
+// handleImport：Netscape Bookmark形式のHTMLファイルを読み込んでDBに登録するAPIです。
+func handleImport(w http.ResponseWriter, r *http.Request) {
+	// multipart/form-data 形式でファイルを受け取ります。
+	// ParseMultipartForm の引数は最大メモリ使用量（バイト）です。
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB
+		http.Error(w, "ファイルの解析に失敗しました", http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "ファイルが見つかりません", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// ファイルの内容をすべて読み込みます。
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "ファイルの読み込みに失敗しました", http.StatusInternalServerError)
+		return
+	}
+	html := string(content)
+
+	// <DT><A ...> のパターンでブックマークを抽出します。
+	// (?s) は . が改行にもマッチするオプションです。
+	reBookmark := regexp.MustCompile(`(?i)<DT><A\s([^>]+)>([^<]*)</A>`)
+	reHref    := regexp.MustCompile(`(?i)HREF="([^"]+)"`)
+	reAddDate := regexp.MustCompile(`(?i)ADD_DATE="([^"]+)"`)
+	reTags    := regexp.MustCompile(`(?i)TAGS="([^"]*)"`)
+	// <DD> タグで説明文を取得します。
+	reDD := regexp.MustCompile(`(?i)<DD>([^\n<]+)`)
+
+	matches := reBookmark.FindAllStringSubmatchIndex(html, -1)
+
+	imported := 0
+	skipped  := 0
+
+	for _, matchIdx := range matches {
+		// matchIdx[2],matchIdx[3] が属性部分、matchIdx[4],matchIdx[5] がタイトルです。
+		attrs := html[matchIdx[2]:matchIdx[3]]
+		title := strings.TrimSpace(html[matchIdx[4]:matchIdx[5]])
+
+		hrefMatch := reHref.FindStringSubmatch(attrs)
+		if len(hrefMatch) < 2 {
+			continue
+		}
+		url := hrefMatch[1]
+
+		// ADD_DATE（Unixタイムスタンプ）を time.Time に変換します。
+		var createdAt time.Time
+		if m := reAddDate.FindStringSubmatch(attrs); len(m) > 1 {
+			if ts, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				createdAt = time.Unix(ts, 0)
+			}
+		}
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
+
+		// タグ名をカンマで分割します。
+		var tagNames []string
+		if m := reTags.FindStringSubmatch(attrs); len(m) > 1 && m[1] != "" {
+			for _, t := range strings.Split(m[1], ",") {
+				if name := strings.TrimSpace(t); name != "" {
+					tagNames = append(tagNames, name)
+				}
+			}
+		}
+
+		// <DD> タグの説明文を取得します（<A>タグの直後を探します）。
+		excerpt := ""
+		afterA := html[matchIdx[1]:]
+		if m := reDD.FindStringSubmatch(afterA); len(m) > 1 {
+			excerpt = strings.TrimSpace(m[1])
+		}
+
+		// URLが重複している場合はスキップします（INSERT OR IGNORE）。
+		result, err := db.Exec(
+			`INSERT OR IGNORE INTO bookmarks (url, title, excerpt, created_at) VALUES (?, ?, ?, ?)`,
+			url, title, excerpt, createdAt,
+		)
+		if err != nil {
+			http.Error(w, "保存エラー: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			// 既にURLが存在していた場合はスキップします。
+			skipped++
+			continue
+		}
+
+		bookmarkID, _ := result.LastInsertId()
+
+		// タグを処理します。存在しないタグは新規作成します。
+		for _, name := range tagNames {
+			// INSERT OR IGNORE でタグが存在しなければ作成します。
+			db.Exec(`INSERT OR IGNORE INTO tags (name) VALUES (?)`, name)
+
+			var tagID int
+			db.QueryRow(`SELECT id FROM tags WHERE name = ?`, name).Scan(&tagID)
+			if tagID > 0 {
+				db.Exec(`INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
+					bookmarkID, tagID)
+			}
+		}
+
+		imported++
+	}
+
+	// 結果をJSONで返します。
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{
+		"imported": imported,
+		"skipped":  skipped,
+	})
 }
