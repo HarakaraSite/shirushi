@@ -202,23 +202,34 @@
   </style>
 </head>
 <body>
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-    <h1 style="margin-bottom:0;">Shirushi</h1>
-    <div style="display:flex; gap:8px; align-items:center;">
-      <!-- エクスポートはリンクをクリックするだけでファイルがダウンロードされます -->
-      <a href="/api/export" download="shirushi-bookmarks.html">
-        <button type="button">エクスポート</button>
-      </a>
-      <!-- インポートはファイル選択後に自動でアップロードします -->
-      <label style="cursor:pointer;">
-        <button type="button" onclick="this.parentElement.querySelector('input').click()">インポート</button>
-        <input type="file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
-      </label>
-    </div>
+  <!-- ログイン画面（未認証のときだけ表示） -->
+  <div id="login-screen" style="display:none; max-width:320px; margin:80px auto;">
+    <h1 style="margin-bottom:24px;">Shirushi</h1>
+    <form id="login-form" style="background:#fff; padding:16px; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
+      <input type="password" id="input-password" placeholder="パスワード" required>
+      <button type="submit">ログイン</button>
+      <p id="login-error" style="color:#e00; font-size:0.875rem; display:none;">パスワードが違います</p>
+    </form>
   </div>
 
-  <!-- 登録フォーム -->
-  <form id="bookmark-form">
+  <!-- メイン画面（認証済みのときだけ表示） -->
+  <div id="main-screen" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+      <h1 style="margin-bottom:0;">Shirushi</h1>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <a href="/api/export" download="shirushi-bookmarks.html">
+          <button type="button">エクスポート</button>
+        </a>
+        <label style="cursor:pointer;">
+          <button type="button" onclick="this.parentElement.querySelector('input').click()">インポート</button>
+          <input type="file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
+        </label>
+        <button type="button" onclick="logout()" style="background:#888;">ログアウト</button>
+      </div>
+    </div>
+
+    <!-- 登録フォーム -->
+    <form id="bookmark-form">
     <input type="url" id="input-url" placeholder="URL（必須）" required>
     <input type="text" id="input-title" placeholder="タイトル">
     <input type="text" id="input-author" placeholder="著者">
@@ -233,22 +244,69 @@
     <button type="submit">登録</button>
   </form>
 
-  <!-- ブックマーク一覧 -->
-  <div id="bookmark-list">
-    <p>読み込み中...</p>
-  </div>
+    <!-- 登録フォームとブックマーク一覧はメイン画面の中に入ります -->
+    <!-- ブックマーク一覧 -->
+    <div id="bookmark-list">
+      <p>読み込み中...</p>
+    </div>
+  </div> <!-- #main-screen ここまで -->
 
   <script>
-    // 全タグと、フォームで選択中のタグを管理する変数です。
     let allTags = [];
-    let selectedTags = []; // 選択中のタグ: [{id, name}, ...]
+    let selectedTags = [];
 
-    // ページ読み込み時にタグと一覧を取得します。
+    // ページ読み込み時に認証状態を確認します。
     document.addEventListener('DOMContentLoaded', async () => {
+      await checkAuth();
+    });
+
+    // GET /api/bookmarks で認証状態を確認します。
+    // 401が返ればログイン画面を、200ならメイン画面を表示します。
+    async function checkAuth() {
+      const res = await fetch('/api/bookmarks');
+      if (res.status === 401) {
+        showLoginScreen();
+      } else {
+        showMainScreen();
+      }
+    }
+
+    function showLoginScreen() {
+      document.getElementById('login-screen').style.display = 'block';
+      document.getElementById('main-screen').style.display = 'none';
+    }
+
+    async function showMainScreen() {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('main-screen').style.display = 'block';
       await loadTags();
       await loadBookmarks();
       setupTagInput();
+    }
+
+    // ログインフォームの送信処理です。
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('input-password').value;
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        document.getElementById('input-password').value = '';
+        document.getElementById('login-error').style.display = 'none';
+        showMainScreen();
+      } else {
+        document.getElementById('login-error').style.display = 'block';
+      }
     });
+
+    // ログアウト処理です。
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      showLoginScreen();
+    }
 
     // GET /api/tags：タグ一覧を取得してメモリに保持します。
     async function loadTags() {

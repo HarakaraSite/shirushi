@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand" // 暗号学的に安全な乱数を生成するパッケージ
 	"database/sql"
+	"encoding/hex"  // バイト列を16進数文字列に変換するパッケージ
 	"encoding/json" // JSON形式を扱うためのパッケージ
 	"embed"         // 静的ファイルをバイナリに埋め込むためのパッケージ
 	"fmt"
@@ -9,9 +11,11 @@ import (
 	"io/fs"  // ファイルシステムを抽象的に扱うためのパッケージ
 	"log"
 	"net/http" // Webサーバー機能を提供するパッケージ
+	"os"       // 環境変数を読み取るためのパッケージ
 	"regexp"   // 正規表現でHTMLのメタタグを抽出するためのパッケージ
 	"strconv"  // 文字列と数値を相互変換するためのパッケージ
 	"strings"  // 文字列操作のためのパッケージ
+	"sync"     // 複数のgoroutineから安全にデータを操作するためのパッケージ
 	"time"
 
 	// modernc.org/sqlite は純粋なGo言語で実装されたSQLiteドライバです。
@@ -52,6 +56,13 @@ type Tag struct {
 // データベースの接続を保持するグローバル変数です。
 var db *sql.DB
 
+// sessions：ログイン中のセッショントークンと有効期限を管理するマップです。
+// 複数のリクエストが同時にアクセスしても安全なよう sync.Mutex で保護します。
+var (
+	sessions   = map[string]time.Time{} // token -> 有効期限
+	sessionsMu sync.Mutex
+)
+
 func main() {
 	var err error
 	// 1. データベースファイル（shirushi.db）を開きます。
@@ -66,6 +77,12 @@ func main() {
 	runMigrations()
 	// 4. APIのルート（住所）と、それぞれの処理（関数）を紐付けます。
 	// Go 1.22からの新機能で、"GET /..." のようにHTTPメソッドを指定できます。
+
+	// 認証API（ミドルウェアの対象外）
+	http.HandleFunc("POST /api/login", handleLogin)
+	http.HandleFunc("POST /api/logout", handleLogout)
+
+	// ブックマーク関連のAPI
 	http.HandleFunc("GET /api/bookmarks", handleGetBookmarks)
 	http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)
@@ -89,21 +106,126 @@ func main() {
 	http.HandleFunc("POST /api/import", handleImport)
 
 	// static/ ディレクトリを埋め込みファイルシステムとして取り出します。
-	// fs.Sub で "static" ディレクトリをルートとして扱えるようにします。
-	// こうすることで "/static/index.html" ではなく "/" でアクセスできます。
 	subFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		log.Fatal("静的ファイルの読み込みエラー:", err)
 	}
-	// http.FileServerFS で埋め込んだファイルをHTTPで配信します。
 	http.Handle("/", http.FileServerFS(subFS))
 
 	fmt.Println("サーバーを起動しました: http://localhost:8181")
 	fmt.Println("API一覧を確認する: http://localhost:8181/api/bookmarks")
-	// 5. 指定したポートでWebサーバーを起動し、待ち受け状態にします。
-	if err := http.ListenAndServe(":8181", nil); err != nil {
+	// 5. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
+	if err := http.ListenAndServe(":8181", authMiddleware(http.DefaultServeMux)); err != nil {
 		log.Fatal("サーバー起動エラー:", err)
 	}
+}
+
+// authMiddleware：全リクエストに認証チェックを適用するミドルウェアです。
+// ミドルウェアとは「ハンドラの前後に処理を挟む仕組み」のことです。
+// http.Handler を受け取り、認証チェックを追加した新しい http.Handler を返します。
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ログイン・ログアウトAPIと静的ファイルは認証不要です。
+		if r.URL.Path == "/api/login" ||
+			r.URL.Path == "/api/logout" ||
+			!strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Cookieからセッショントークンを取り出します。
+		cookie, err := r.Cookie("session")
+		if err != nil {
+			// Cookieがない場合は401 Unauthorizedを返します。
+			http.Error(w, "認証が必要です", http.StatusUnauthorized)
+			return
+		}
+
+		// トークンが有効かどうかを確認します。
+		sessionsMu.Lock()
+		expiry, ok := sessions[cookie.Value]
+		sessionsMu.Unlock()
+
+		if !ok || time.Now().After(expiry) {
+			// トークンが存在しない、または期限切れの場合は401を返します。
+			http.Error(w, "セッションが無効です", http.StatusUnauthorized)
+			return
+		}
+
+		// 認証OK：次のハンドラに処理を渡します。
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleLogin：パスワードを受け取り、正しければセッショントークンを発行するAPIです。
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
+		return
+	}
+
+	// 環境変数からパスワードを取得して照合します。
+	// パスワードをコードに直接書かず環境変数にする理由は、
+	// ソースコードをgitで管理しても漏洩しないようにするためです。
+	correctPassword := os.Getenv("SHIRUSHI_PASSWORD")
+	if correctPassword == "" || body.Password != correctPassword {
+		http.Error(w, "パスワードが違います", http.StatusUnauthorized)
+		return
+	}
+
+	// crypto/rand で暗号学的に安全なランダムトークンを生成します。
+	// math/rand と違い、予測不可能な値が生成されます。
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		http.Error(w, "トークン生成エラー", http.StatusInternalServerError)
+		return
+	}
+	token := hex.EncodeToString(tokenBytes) // バイト列を16進数文字列に変換します。
+
+	// セッションを保存します（有効期限は24時間）。
+	sessionsMu.Lock()
+	sessions[token] = time.Now().Add(24 * time.Hour)
+	sessionsMu.Unlock()
+
+	// Cookieにトークンをセットします。
+	// HttpOnly: JavaScriptからCookieを読めなくする（XSS対策）
+	// SameSite: 別サイトからのリクエストにCookieを送らない（CSRF対策）
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400, // 24時間（秒）
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleLogout：セッションを削除してログアウトするAPIです。
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err == nil {
+		// セッションマップからトークンを削除します。
+		sessionsMu.Lock()
+		delete(sessions, cookie.Value)
+		sessionsMu.Unlock()
+	}
+
+	// Cookieを即座に無効化します（MaxAge=-1 で削除）。
+	http.SetCookie(w, &http.Cookie{
+		Name:   "session",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // createTable：新規インストール時に必要なテーブルをすべて作成する関数です。
