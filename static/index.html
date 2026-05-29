@@ -267,6 +267,16 @@
       margin-top: 6px;
     }
 
+    /* サムネイル画像 */
+    .bookmark-thumb {
+      width: 80px;
+      height: 60px;
+      object-fit: cover;     /* はみ出た部分をトリミングします */
+      border-radius: 4px;
+      flex-shrink: 0;
+      background: #eee;      /* 画像読み込み中の背景色 */
+    }
+
     /* ===== バッチ操作バー ===== */
     #bulk-bar {
       display: none; /* 選択中のみ表示 */
@@ -515,6 +525,12 @@
     let editingId = null;    // null = 追加モード、数値 = 編集対象のID
     let activeTag = null;    // 現在選択中のフィルタータグ名（null = 絞り込みなし）
     let selectedIds = new Set(); // バッチ選択中のブックマークID集合
+    let pendingImageUrl = ''; // メタデータ取得で得たOG画像URL（フォーム送信まで保持）
+
+    // OG画像がない・読み込み失敗時に使うSVGプレースホルダーです。
+    // data URI にすることでファイル不要でインラインに埋め込めます。
+    // SVGの中でブックマークアイコンを描いています。
+    const THUMB_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3Crect width='80' height='60' fill='%23f0f4f8'/%3E%3Cpath d='M32 16h16v28l-8-5-8 5z' fill='%23c7d2e0'/%3E%3C/svg%3E";
 
     // ブックマークデータを ID で引けるように保持します。
     // onclick に JSON.stringify を直接埋め込むと、タイトルや抜粋に含まれる
@@ -651,6 +667,17 @@
             onchange="toggleSelect(${b.id}, this.checked)"
             ${selectedIds.has(b.id) ? 'checked' : ''}
           >
+          <!-- サムネイル：OG画像があればそれを、なければプレースホルダーを表示します。
+               onerror で読み込み失敗時も自動的にプレースホルダーに切り替わります。 -->
+          <a href="${b.url}" target="_blank" rel="noopener" style="flex-shrink:0;">
+            <img
+              class="bookmark-thumb"
+              src="${b.image_url ? escapeHtml(b.image_url) : THUMB_PLACEHOLDER}"
+              alt=""
+              loading="lazy"
+              onerror="this.src=THUMB_PLACEHOLDER"
+            >
+          </a>
           <div class="bookmark-info">
             <a class="title-link" href="${b.url}" target="_blank" rel="noopener">${escapeHtml(b.title || b.url)}</a>
             <div class="bookmark-url">${escapeHtml(b.url)}</div>
@@ -689,6 +716,7 @@
     // 「追加モード」でモーダルを開きます。フォームを空にします。
     function openModal() {
       editingId = null;
+      pendingImageUrl = ''; // 画像URLをリセットします
       document.getElementById('modal-heading').textContent = 'ブックマークを追加';
       document.getElementById('modal-submit-btn').textContent = '登録';
       document.getElementById('bookmark-form').reset();
@@ -721,6 +749,9 @@
       selectedTags = b.tags ? b.tags.map(t => ({ id: t.id, name: t.name })) : [];
       renderSelectedTags();
 
+      // 編集モードでは既存の image_url を引き継ぎます。
+      pendingImageUrl = b.image_url ?? '';
+
       document.getElementById('modal-overlay').classList.add('open');
       document.getElementById('input-title').focus();
     }
@@ -740,16 +771,20 @@
 
     // ===== フォーム送信 =====
 
-    // URLのblurでメタデータを自動取得します（追加モードのときだけ）。
+    // URLのblurでメタデータを自動取得します。
+    // 追加モード：タイトル・著者・抜粋・画像URLをすべて取得します。
+    // 編集モード：画像URLが未設定の場合のみ取得します（既存テキストは上書きしません）。
     document.getElementById('input-url').addEventListener('blur', async () => {
-      // 編集モード（editingId が設定済み）では上書きしません。
-      if (editingId !== null) return;
-
       const url = document.getElementById('input-url').value.trim();
       if (!url) return;
 
+      const isEditMode = editingId !== null;
       const titleInput = document.getElementById('input-title');
-      if (titleInput.value.trim()) return; // タイトルが入力済みなら上書きしない
+
+      // 編集モードでタイトルが入力済み、かつ画像も取得済みなら何もしません。
+      if (isEditMode && pendingImageUrl) return;
+      // 追加モードでタイトルが入力済みなら上書きしません（画像は取得します）。
+      const skipText = isEditMode || titleInput.value.trim() !== '';
 
       titleInput.placeholder = '取得中...';
       const res = await fetch('/api/fetch-metadata', {
@@ -761,12 +796,20 @@
       if (!res.ok) return;
 
       const meta = await res.json();
-      if (meta.title   && !titleInput.value)
-        titleInput.value = meta.title;
-      if (meta.excerpt && !document.getElementById('input-excerpt').value)
-        document.getElementById('input-excerpt').value = meta.excerpt;
-      if (meta.author  && !document.getElementById('input-author').value)
-        document.getElementById('input-author').value = meta.author;
+
+      // テキスト系フィールドは追加モード・未入力のときだけ自動入力します。
+      if (!skipText) {
+        if (meta.title   && !titleInput.value)
+          titleInput.value = meta.title;
+        if (meta.excerpt && !document.getElementById('input-excerpt').value)
+          document.getElementById('input-excerpt').value = meta.excerpt;
+        if (meta.author  && !document.getElementById('input-author').value)
+          document.getElementById('input-author').value = meta.author;
+      }
+
+      // 画像URLは追加・編集モードともに未設定のときだけ保存します。
+      if (meta.image_url && !pendingImageUrl)
+        pendingImageUrl = meta.image_url;
     });
 
     // フォーム送信：editingId の有無で POST / PUT を切り替えます。
@@ -774,11 +817,12 @@
       e.preventDefault();
 
       const payload = {
-        url:     document.getElementById('input-url').value,
-        title:   document.getElementById('input-title').value,
-        author:  document.getElementById('input-author').value,
-        excerpt: document.getElementById('input-excerpt').value,
-        tags:    selectedTags.map(t => ({ id: t.id })),
+        url:       document.getElementById('input-url').value,
+        title:     document.getElementById('input-title').value,
+        author:    document.getElementById('input-author').value,
+        excerpt:   document.getElementById('input-excerpt').value,
+        image_url: pendingImageUrl, // メタデータ取得 or 編集で引き継いだOG画像URL
+        tags:      selectedTags.map(t => ({ id: t.id })),
       };
 
       let res;
