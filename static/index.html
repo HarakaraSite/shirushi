@@ -267,6 +267,48 @@
       margin-top: 6px;
     }
 
+    /* ===== バッチ操作バー ===== */
+    #bulk-bar {
+      display: none; /* 選択中のみ表示 */
+      align-items: center;
+      gap: 12px;
+      background: #1a56db;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+    }
+
+    #bulk-bar.visible {
+      display: flex;
+    }
+
+    #bulk-bar button {
+      background: #fff;
+      color: #e00;
+      font-size: 0.875rem;
+      padding: 4px 14px;
+    }
+
+    #bulk-bar button:hover {
+      background: #fdd;
+    }
+
+    #bulk-bar .bulk-cancel {
+      color: #555;
+      margin-left: auto; /* 右端に寄せます */
+    }
+
+    /* チェックボックス列 */
+    .bookmark-checkbox {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: #1a56db; /* チェック色をブランドカラーに */
+    }
+
     /* カードの操作ボタン群 */
     .bookmark-actions {
       display: flex;
@@ -339,6 +381,13 @@
     <!-- タグフィルターチップ（タグがあるときだけ表示） -->
     <div id="tag-filter-area" style="display:none;"></div>
 
+    <!-- バッチ操作バー（1件以上選択したときだけ表示） -->
+    <div id="bulk-bar">
+      <span id="bulk-count">0件選択中</span>
+      <button type="button" onclick="bulkDelete()">一括削除</button>
+      <button type="button" class="bulk-cancel" onclick="clearSelection()" style="background:transparent; color:#fff; padding:4px 8px;">✕ 選択解除</button>
+    </div>
+
     <!-- ブックマーク一覧 -->
     <div id="bookmark-list">
       <p>読み込み中...</p>
@@ -374,10 +423,11 @@
   </div>
 
   <script>
-    let allTags = [];      // サーバーから取得した全タグ
-    let selectedTags = []; // モーダルフォームで選択中のタグ
-    let editingId = null;  // null = 追加モード、数値 = 編集対象のID
-    let activeTag = null;  // 現在選択中のフィルタータグ名（null = 絞り込みなし）
+    let allTags = [];        // サーバーから取得した全タグ
+    let selectedTags = [];   // モーダルフォームで選択中のタグ
+    let editingId = null;    // null = 追加モード、数値 = 編集対象のID
+    let activeTag = null;    // 現在選択中のフィルタータグ名（null = 絞り込みなし）
+    let selectedIds = new Set(); // バッチ選択中のブックマークID集合
 
     // ブックマークデータを ID で引けるように保持します。
     // onclick に JSON.stringify を直接埋め込むと、タイトルや抜粋に含まれる
@@ -507,10 +557,15 @@
 
       list.innerHTML = bookmarks.map(b => `
         <div class="bookmark-item" data-id="${b.id}">
+          <!-- チェックボックス：onchange でバッチ選択状態を更新します -->
+          <input
+            type="checkbox"
+            class="bookmark-checkbox"
+            onchange="toggleSelect(${b.id}, this.checked)"
+            ${selectedIds.has(b.id) ? 'checked' : ''}
+          >
           <div class="bookmark-info">
-            <!-- タイトル -->
             <a class="title-link" href="${b.url}" target="_blank" rel="noopener">${escapeHtml(b.title || b.url)}</a>
-            <!-- URLをタイトルの下に表示（Task #4） -->
             <div class="bookmark-url">${escapeHtml(b.url)}</div>
             ${b.author ? `<div class="author">${escapeHtml(b.author)}</div>` : ''}
             ${b.excerpt ? `<div class="excerpt">${escapeHtml(b.excerpt)}</div>` : ''}
@@ -521,7 +576,6 @@
             ` : ''}
             <div class="date">${new Date(b.created_at).toLocaleDateString('ja-JP')}</div>
           </div>
-          <!-- 編集・削除ボタン：IDだけ渡してデータはMapから取得します -->
           <div class="bookmark-actions">
             <button class="edit-btn" onclick="openEditModal(${b.id})">編集</button>
             <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
@@ -773,6 +827,61 @@
     function removeTag(id) {
       selectedTags = selectedTags.filter(t => t.id !== id);
       renderSelectedTags();
+    }
+
+    // ===== バッチ選択・一括削除 =====
+
+    // チェックボックスの変化を受け取り、selectedIds（Set）を更新します。
+    // Set は同じ値を重複して持たないため、選択管理に適しています。
+    function toggleSelect(id, checked) {
+      if (checked) {
+        selectedIds.add(id);
+      } else {
+        selectedIds.delete(id);
+      }
+      updateBulkBar();
+    }
+
+    // バッチ操作バーの表示・件数テキストを更新します。
+    function updateBulkBar() {
+      const bar = document.getElementById('bulk-bar');
+      const count = selectedIds.size;
+      if (count > 0) {
+        bar.classList.add('visible');
+        document.getElementById('bulk-count').textContent = `${count}件選択中`;
+      } else {
+        bar.classList.remove('visible');
+      }
+    }
+
+    // 選択をすべて解除してバッチ操作バーを非表示にします。
+    function clearSelection() {
+      selectedIds.clear();
+      // チェックボックスの見た目もリセットします。
+      document.querySelectorAll('.bookmark-checkbox').forEach(cb => cb.checked = false);
+      updateBulkBar();
+    }
+
+    // 選択中のブックマークをまとめて削除します。
+    async function bulkDelete() {
+      const count = selectedIds.size;
+      if (!confirm(`選択中の ${count} 件を削除しますか？`)) return;
+
+      // DELETE /api/bookmarks に IDリストをJSONで送信します。
+      const res = await fetch('/api/bookmarks', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...selectedIds] }),
+      });
+
+      if (res.ok) {
+        selectedIds.clear();
+        updateBulkBar();
+        const q = document.getElementById('search-input').value.trim();
+        await loadBookmarks(q, activeTag);
+      } else {
+        alert('一括削除に失敗しました');
+      }
     }
 
     // ===== インポート・削除 =====

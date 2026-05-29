@@ -87,6 +87,7 @@ func main() {
 	http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)
 	http.HandleFunc("DELETE /api/bookmarks/{id}", handleDeleteBookmark)
+	http.HandleFunc("DELETE /api/bookmarks", handleBulkDeleteBookmarks)
 
 	// タグ関連のAPI
 	http.HandleFunc("GET /api/tags", handleGetTags)
@@ -785,6 +786,47 @@ func handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// 削除成功は204 No Content（返すデータなし）が REST の慣習です。
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBulkDeleteBookmarks：複数のブックマークをまとめて削除するAPIです。
+// リクエストボディ: {"ids": [1, 2, 3]}
+func handleBulkDeleteBookmarks(w http.ResponseWriter, r *http.Request) {
+	// リクエストボディを構造体に読み込みます。
+	var req struct {
+		IDs []int `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+		http.Error(w, "IDリストが不正です", http.StatusBadRequest)
+		return
+	}
+
+	// IN句のプレースホルダーを動的に生成します。
+	// 例: IDs=[1,2,3] → "?,?,?"
+	placeholders := strings.Repeat("?,", len(req.IDs))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	// []int を []interface{} に変換してクエリに渡します。
+	// database/sql はインターフェース型のスライスを要求するためです。
+	args := make([]interface{}, len(req.IDs))
+	for i, id := range req.IDs {
+		args[i] = id
+	}
+
+	// 1回のDELETE文でまとめて削除します。
+	// bookmark_tagsの紐付けはON DELETE CASCADEで自動削除されます。
+	result, err := db.Exec(
+		fmt.Sprintf("DELETE FROM bookmarks WHERE id IN (%s)", placeholders),
+		args...,
+	)
+	if err != nil {
+		http.Error(w, "削除エラー", http.StatusInternalServerError)
+		return
+	}
+
+	deleted, _ := result.RowsAffected()
+	// 削除件数をJSONで返します。
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"deleted": int(deleted)})
 }
 
 // Metadata 構造体：URLから取得したメタデータを表します。
