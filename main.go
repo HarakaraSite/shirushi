@@ -98,6 +98,8 @@ func main() {
 	// ブックマークとタグの紐付けAPI
 	http.HandleFunc("POST /api/bookmarks/{id}/tags", handleAddTagToBookmark)
 	http.HandleFunc("DELETE /api/bookmarks/{id}/tags", handleRemoveTagFromBookmark)
+	http.HandleFunc("POST /api/bookmarks/bulk/tags", handleBulkAddTags)
+	http.HandleFunc("DELETE /api/bookmarks/bulk/tags", handleBulkRemoveTags)
 
 	// URLからメタデータを取得するAPI
 	http.HandleFunc("POST /api/fetch-metadata", handleFetchMetadata)
@@ -785,6 +787,99 @@ func handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 削除成功は204 No Content（返すデータなし）が REST の慣習です。
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBulkAddTags：複数のブックマークに複数のタグをまとめて付与するAPIです。
+// リクエストボディ: {"bookmark_ids": [1,2,3], "tag_ids": [10,11]}
+// すでに紐付いているものは INSERT OR IGNORE でスキップします。
+func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BookmarkIDs []int `json:"bookmark_ids"`
+		TagIDs      []int `json:"tag_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		len(req.BookmarkIDs) == 0 || len(req.TagIDs) == 0 {
+		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
+		return
+	}
+
+	// トランザクション：全ての挿入を1まとめにします。
+	// 途中でエラーが起きた場合は全件ロールバックされます。
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "トランザクション開始エラー", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback() // commit前にreturnした場合の安全策
+
+	// ブックマークID × タグID の全組み合わせを挿入します。
+	// INSERT OR IGNORE はすでに存在するペアを静かにスキップします。
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)")
+	if err != nil {
+		http.Error(w, "クエリ準備エラー", http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	for _, bID := range req.BookmarkIDs {
+		for _, tID := range req.TagIDs {
+			if _, err := stmt.Exec(bID, tID); err != nil {
+				http.Error(w, "タグ追加エラー", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "コミットエラー", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBulkRemoveTags：複数のブックマークから複数のタグをまとめて削除するAPIです。
+// リクエストボディ: {"bookmark_ids": [1,2,3], "tag_ids": [10,11]}
+func handleBulkRemoveTags(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BookmarkIDs []int `json:"bookmark_ids"`
+		TagIDs      []int `json:"tag_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		len(req.BookmarkIDs) == 0 || len(req.TagIDs) == 0 {
+		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
+		return
+	}
+
+	// IN句のプレースホルダーを bookmark_ids 分・tag_ids 分それぞれ生成します。
+	bPlaceholders := strings.Repeat("?,", len(req.BookmarkIDs))
+	bPlaceholders = bPlaceholders[:len(bPlaceholders)-1]
+	tPlaceholders := strings.Repeat("?,", len(req.TagIDs))
+	tPlaceholders = tPlaceholders[:len(tPlaceholders)-1]
+
+	// []int を []interface{} に変換してクエリ引数としてまとめます。
+	args := make([]interface{}, 0, len(req.BookmarkIDs)+len(req.TagIDs))
+	for _, id := range req.BookmarkIDs {
+		args = append(args, id)
+	}
+	for _, id := range req.TagIDs {
+		args = append(args, id)
+	}
+
+	// bookmark_id と tag_id の両方が一致する行をまとめて削除します。
+	_, err := db.Exec(
+		fmt.Sprintf(
+			"DELETE FROM bookmark_tags WHERE bookmark_id IN (%s) AND tag_id IN (%s)",
+			bPlaceholders, tPlaceholders,
+		),
+		args...,
+	)
+	if err != nil {
+		http.Error(w, "タグ削除エラー", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

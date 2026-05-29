@@ -295,9 +295,74 @@
       background: #fdd;
     }
 
+    /* タグ追加ボタンは赤ではなく青系にします */
+    #bulk-tag-btn {
+      color: #1a56db !important;
+    }
+
+    /* タグ削除ボタンはオレンジ系にします */
+    #bulk-tag-remove-btn {
+      color: #b45309 !important;
+    }
+
     #bulk-bar .bulk-cancel {
       color: #555;
       margin-left: auto; /* 右端に寄せます */
+    }
+
+    /* タグ追加・削除 共通ドロップダウンスタイル */
+    #bulk-tag-dropdown-wrapper {
+      position: relative;
+    }
+
+    #bulk-tag-dropdown,
+    #bulk-tag-remove-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      min-width: 200px;
+      z-index: 300;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* ドロップダウン上部の入力欄（追加・削除共通） */
+    .bulk-tag-search-input {
+      width: 100%;
+      border: none;
+      border-bottom: 1px solid #eee;
+      border-radius: 6px 6px 0 0;
+      padding: 8px 12px;
+      font-size: 0.875rem;
+      outline: none;
+      color: #333;
+    }
+
+    /* 候補リスト部分だけスクロール */
+    .bulk-tag-list {
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    /* 追加・削除どちらのドロップダウンにも適用します。
+       #bulk-bar が color:#fff を持つため、継承を明示的に上書きします。 */
+    #bulk-tag-dropdown,
+    #bulk-tag-remove-dropdown {
+      color: #333;
+    }
+
+    #bulk-tag-dropdown .bulk-tag-item,
+    #bulk-tag-remove-dropdown .bulk-tag-item {
+      padding: 8px 14px;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+
+    #bulk-tag-dropdown .bulk-tag-item:hover,
+    #bulk-tag-remove-dropdown .bulk-tag-item:hover {
+      background: #f0f4ff;
     }
 
     /* チェックボックス列 */
@@ -384,6 +449,28 @@
     <!-- バッチ操作バー（1件以上選択したときだけ表示） -->
     <div id="bulk-bar">
       <span id="bulk-count">0件選択中</span>
+
+      <!-- タグ追加ボタン＋ドロップダウン（相対配置のwrapperで包みます） -->
+      <div id="bulk-tag-dropdown-wrapper">
+        <button type="button" id="bulk-tag-btn" onclick="toggleBulkTagDropdown()">＋ タグを追加</button>
+          <!-- タグ追加ドロップダウン -->
+        <div id="bulk-tag-dropdown" style="display:none;">
+          <input type="text" class="bulk-tag-search-input" id="bulk-tag-input"
+            placeholder="タグ名を入力… Enter で作成" autocomplete="off">
+          <div class="bulk-tag-list" id="bulk-tag-list"></div>
+        </div>
+      </div>
+
+      <!-- タグ削除ボタン＋ドロップダウン -->
+      <div id="bulk-tag-remove-dropdown-wrapper" style="position:relative;">
+        <button type="button" id="bulk-tag-remove-btn" onclick="toggleBulkTagRemoveDropdown()">－ タグを削除</button>
+        <div id="bulk-tag-remove-dropdown" style="display:none;">
+          <input type="text" class="bulk-tag-search-input" id="bulk-tag-remove-input"
+            placeholder="タグ名で絞り込み…" autocomplete="off">
+          <div class="bulk-tag-list" id="bulk-tag-remove-list"></div>
+        </div>
+      </div>
+
       <button type="button" onclick="bulkDelete()">一括削除</button>
       <button type="button" class="bulk-cancel" onclick="clearSelection()" style="background:transparent; color:#fff; padding:4px 8px;">✕ 選択解除</button>
     </div>
@@ -860,6 +947,204 @@
       // チェックボックスの見た目もリセットします。
       document.querySelectorAll('.bookmark-checkbox').forEach(cb => cb.checked = false);
       updateBulkBar();
+      closeBulkTagDropdown();
+      closeBulkTagRemoveDropdown();
+    }
+
+    // ===== 一括タグ追加 =====
+
+    // 「タグを追加」ボタンでドロップダウンの表示・非表示を切り替えます。
+    function toggleBulkTagDropdown() {
+      const dropdown = document.getElementById('bulk-tag-dropdown');
+      if (dropdown.style.display === 'none') {
+        dropdown.style.display = 'block';
+        const input = document.getElementById('bulk-tag-input');
+        input.value = '';
+        renderBulkTagList(''); // 全タグを初期表示します
+        input.focus();
+      } else {
+        closeBulkTagDropdown();
+      }
+    }
+
+    // 入力に応じてタグ候補リストを絞り込みます。
+    // モーダルの renderTagDropdown と同じ考え方です。
+    function renderBulkTagList(query) {
+      const list = document.getElementById('bulk-tag-list');
+      const q = query.toLowerCase();
+
+      const filtered = allTags.filter(t =>
+        t.name.toLowerCase().includes(q)
+      );
+
+      if (filtered.length === 0 && query === '') {
+        list.innerHTML = '<div class="bulk-tag-item" style="color:#999; cursor:default;">タグがありません</div>';
+        return;
+      }
+
+      let html = filtered.map(t =>
+        `<div class="bulk-tag-item" onclick="bulkAddTag(${t.id}, null)">${escapeHtml(t.name)}</div>`
+      ).join('');
+
+      // 完全一致するタグがなければ「Enterで新規作成」のヒントを出します。
+      const exactMatch = allTags.some(t => t.name.toLowerCase() === q);
+      if (query && !exactMatch) {
+        html += `<div class="bulk-tag-item" style="color:#888; border-top:1px solid #eee;">
+          Enter で「${escapeHtml(query)}」を新規作成
+        </div>`;
+      }
+
+      list.innerHTML = html;
+    }
+
+    function closeBulkTagDropdown() {
+      document.getElementById('bulk-tag-dropdown').style.display = 'none';
+    }
+
+    // ドロップダウン内の入力欄のイベントを設定します。
+    // DOMContentLoaded 後にまとめて登録します。
+    document.addEventListener('DOMContentLoaded', () => {
+      const input = document.getElementById('bulk-tag-input');
+
+      // 文字を入力するたびに候補を絞り込みます。
+      input.addEventListener('input', () => {
+        renderBulkTagList(input.value.trim());
+      });
+
+      // Enter キーで確定します（新規作成 or 既存タグを選択）。
+      input.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+
+        const name = input.value.trim();
+        if (!name) return;
+
+        const existing = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+        if (existing) {
+          // 既存タグ：そのまま付与します。
+          await bulkAddTag(existing.id, null);
+        } else {
+          // 未登録タグ：POST /api/tags で作成してから付与します。
+          const res = await fetch('/api/tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          if (!res.ok) { alert('タグの作成に失敗しました'); return; }
+          const newTag = await res.json();
+          allTags.push(newTag); // 次回以降の候補に追加します
+          await bulkAddTag(newTag.id, null);
+        }
+      });
+    });
+
+    // ===== タグ一括削除ドロップダウン =====
+
+    function toggleBulkTagRemoveDropdown() {
+      const dropdown = document.getElementById('bulk-tag-remove-dropdown');
+      if (dropdown.style.display === 'none') {
+        dropdown.style.display = 'block';
+        const input = document.getElementById('bulk-tag-remove-input');
+        input.value = '';
+        renderBulkTagRemoveList('');
+        input.focus();
+      } else {
+        dropdown.style.display = 'none';
+      }
+    }
+
+    function closeBulkTagRemoveDropdown() {
+      document.getElementById('bulk-tag-remove-dropdown').style.display = 'none';
+    }
+
+    // 削除候補は「選択中のブックマークが持つタグ」だけ表示します。
+    // 付いていないタグを削除しようとしても意味がないためです。
+    function renderBulkTagRemoveList(query) {
+      const list = document.getElementById('bulk-tag-remove-list');
+      const q = query.toLowerCase();
+
+      // 選択中ブックマークが持つタグIDを集めます（重複なし）。
+      const tagIdSet = new Set();
+      for (const id of selectedIds) {
+        const b = bookmarkMap.get(id);
+        if (b && b.tags) b.tags.forEach(t => tagIdSet.add(t.id));
+      }
+
+      // そのタグIDに対応するタグオブジェクトを allTags から引きます。
+      const removable = allTags.filter(t =>
+        tagIdSet.has(t.id) && t.name.toLowerCase().includes(q)
+      );
+
+      if (removable.length === 0) {
+        list.innerHTML = '<div class="bulk-tag-item" style="color:#999; cursor:default;">対象タグがありません</div>';
+        return;
+      }
+
+      list.innerHTML = removable.map(t =>
+        `<div class="bulk-tag-item" onclick="bulkRemoveTag(${t.id})">${escapeHtml(t.name)}</div>`
+      ).join('');
+    }
+
+    // 削除候補の入力欄イベントは DOMContentLoaded でまとめて登録します。
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('bulk-tag-remove-input').addEventListener('input', (e) => {
+        renderBulkTagRemoveList(e.target.value.trim());
+      });
+    });
+
+    // 選択中の全ブックマークから指定タグを一括削除します。
+    async function bulkRemoveTag(tagId) {
+      closeBulkTagRemoveDropdown();
+
+      const res = await fetch('/api/bookmarks/bulk/tags', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookmark_ids: [...selectedIds],
+          tag_ids: [tagId],
+        }),
+      });
+
+      if (res.ok) {
+        const q = document.getElementById('search-input').value.trim();
+        await loadBookmarks(q, activeTag);
+      } else {
+        alert('タグの一括削除に失敗しました');
+      }
+    }
+
+    // ドロップダウン以外をクリックしたら両方閉じます。
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#bulk-tag-dropdown-wrapper')) {
+        closeBulkTagDropdown();
+      }
+      if (!e.target.closest('#bulk-tag-remove-dropdown-wrapper')) {
+        closeBulkTagRemoveDropdown();
+      }
+    });
+
+    // 選択中の全ブックマークに指定タグを一括付与します。
+    // tagId: 付与するタグID
+    // _unused: 将来の拡張用（現在未使用）
+    async function bulkAddTag(tagId, _unused) {
+      closeBulkTagDropdown();
+
+      const res = await fetch('/api/bookmarks/bulk/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookmark_ids: [...selectedIds], // Set を配列に変換して送ります
+          tag_ids: [tagId],
+        }),
+      });
+
+      if (res.ok) {
+        const q = document.getElementById('search-input').value.trim();
+        await loadBookmarks(q, activeTag);
+        await loadTags(); // 新規タグが増えたときフィルターチップを更新します
+      } else {
+        alert('タグの一括追加に失敗しました');
+      }
     }
 
     // 選択中のブックマークをまとめて削除します。
