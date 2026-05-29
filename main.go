@@ -442,11 +442,11 @@ func migrateAddUniqueURL() {
 // handleGetBookmarks：登録されているブックマークを一覧で返すAPIです。
 // クエリパラメータ:
 //   ?q=keyword  タイトル・URL・excerptで絞り込み検索
+//   ?tag=name   タグ名で絞り込み
 //   ?limit=N    取得件数上限（デフォルト100、最大500）
 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
-	// r.URL.Query().Get() でクエリパラメータを取得します。
-	// 例: /api/bookmarks?q=go → "go" が返ります。
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	q   := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 
 	// 件数上限を取得します。指定なし・不正値はデフォルト100件にします。
 	limit := 100
@@ -457,17 +457,19 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 
-	if q == "" {
-		// 検索ワードなし：新しい順に上限件数分取得します。
-		// LIMIT ? で取得件数を絞ることで、大量データでも高速に返せます。
+	// q（キーワード）と tag（タグ名）の組み合わせで4パターンに分岐します。
+	// タグ絞り込みがある場合は bookmark_tags・tags テーブルと JOIN します。
+	switch {
+	case q == "" && tag == "":
+		// 絞り込みなし：新しい順に全件取得します。
 		rows, err = db.Query(`
 			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
 			FROM bookmarks
 			ORDER BY id DESC
 			LIMIT ?`, limit)
-	} else {
-		// 検索ワードあり：LIKE で部分一致検索します。
-		// % は「任意の文字列」を意味するワイルドカードです。
+
+	case q != "" && tag == "":
+		// キーワード検索のみ：LIKE で部分一致します。
 		like := "%" + q + "%"
 		rows, err = db.Query(`
 			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
@@ -476,6 +478,32 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 			ORDER BY id DESC
 			LIMIT ?`,
 			like, like, like, limit)
+
+	case q == "" && tag != "":
+		// タグ絞り込みのみ：INNER JOIN でタグに紐付くブックマークだけ取得します。
+		rows, err = db.Query(`
+			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+			FROM bookmarks b
+			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+			INNER JOIN tags t ON t.id = bt.tag_id
+			WHERE t.name = ?
+			ORDER BY b.id DESC
+			LIMIT ?`,
+			tag, limit)
+
+	default:
+		// キーワード＋タグ絞り込み：両方の条件を AND で組み合わせます。
+		like := "%" + q + "%"
+		rows, err = db.Query(`
+			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+			FROM bookmarks b
+			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+			INNER JOIN tags t ON t.id = bt.tag_id
+			WHERE t.name = ?
+			  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
+			ORDER BY b.id DESC
+			LIMIT ?`,
+			tag, like, like, like, limit)
 	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)

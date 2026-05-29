@@ -160,6 +160,35 @@
       background: #f0f4ff;
     }
 
+    /* ===== タグフィルターチップ ===== */
+    #tag-filter-area {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .tag-filter-chip {
+      background: #e8f0fe;
+      color: #1a56db;
+      font-size: 0.8rem;
+      padding: 4px 12px;
+      border-radius: 99px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      user-select: none; /* ダブルクリック時のテキスト選択を防ぎます */
+    }
+
+    .tag-filter-chip:hover {
+      background: #d0e2ff;
+    }
+
+    /* 選択中のチップは枠線を付けてアクティブ状態を示します */
+    .tag-filter-chip.active {
+      border-color: #1a56db;
+      font-weight: bold;
+    }
+
     /* ===== ブックマーク一覧 ===== */
     #bookmark-list {
       display: flex;
@@ -307,6 +336,9 @@
       style="width:100%; margin-bottom:16px;"
     >
 
+    <!-- タグフィルターチップ（タグがあるときだけ表示） -->
+    <div id="tag-filter-area" style="display:none;"></div>
+
     <!-- ブックマーク一覧 -->
     <div id="bookmark-list">
       <p>読み込み中...</p>
@@ -345,6 +377,7 @@
     let allTags = [];      // サーバーから取得した全タグ
     let selectedTags = []; // モーダルフォームで選択中のタグ
     let editingId = null;  // null = 追加モード、数値 = 編集対象のID
+    let activeTag = null;  // 現在選択中のフィルタータグ名（null = 絞り込みなし）
 
     // ブックマークデータを ID で引けるように保持します。
     // onclick に JSON.stringify を直接埋め込むと、タイトルや抜粋に含まれる
@@ -405,11 +438,12 @@
     // ===== 検索 =====
 
     // debounce: 入力が止まって300ms後に検索します。
+    // activeTag（タグフィルター）を維持したまま検索します。
     let searchTimer = null;
     document.getElementById('search-input').addEventListener('input', (e) => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
-        loadBookmarks(e.target.value.trim());
+        loadBookmarks(e.target.value.trim(), activeTag);
       }, 300);
     });
 
@@ -418,11 +452,46 @@
     async function loadTags() {
       const res = await fetch('/api/tags');
       allTags = await res.json() ?? [];
+      renderTagFilterChips();
     }
 
-    async function loadBookmarks(q = '') {
+    // タグフィルターチップを描画します。
+    // タグが1件もない場合はエリアごと非表示にします。
+    function renderTagFilterChips() {
+      const area = document.getElementById('tag-filter-area');
+      if (allTags.length === 0) {
+        area.style.display = 'none';
+        return;
+      }
+      area.style.display = 'flex';
+      area.innerHTML = allTags.map(t => `
+        <span
+          class="tag-filter-chip ${activeTag === t.name ? 'active' : ''}"
+          onclick="toggleTagFilter('${escapeHtml(t.name)}')"
+        >${escapeHtml(t.name)}</span>
+      `).join('');
+    }
+
+    // タグチップをクリックしたときの処理です。
+    // 選択中のタグと同じものをクリックすると絞り込みを解除します。
+    function toggleTagFilter(tagName) {
+      activeTag = (activeTag === tagName) ? null : tagName;
+      renderTagFilterChips(); // チップのアクティブ状態を更新します
+      const q = document.getElementById('search-input').value.trim();
+      loadBookmarks(q, activeTag);
+    }
+
+    // q（キーワード）と tag（タグ名）を組み合わせてブックマークを取得します。
+    async function loadBookmarks(q = '', tag = null) {
       const list = document.getElementById('bookmark-list');
-      const url = q ? `/api/bookmarks?q=${encodeURIComponent(q)}` : '/api/bookmarks';
+
+      // クエリパラメータを組み立てます。
+      const params = new URLSearchParams();
+      if (q)   params.set('q',   q);
+      if (tag) params.set('tag', tag);
+      const qs = params.toString();
+      const url = qs ? `/api/bookmarks?${qs}` : '/api/bookmarks';
+
       const res = await fetch(url);
       const bookmarks = await res.json();
 
@@ -590,9 +659,10 @@
 
       if (res.ok) {
         closeModal();
-        // 検索ワードを維持したまま一覧を再読み込みします。
+        // 検索ワードとタグフィルターを維持したまま一覧を再読み込みします。
         const q = document.getElementById('search-input').value.trim();
-        await loadBookmarks(q);
+        await loadBookmarks(q, activeTag);
+        await loadTags(); // 新規タグが追加された場合にフィルターチップを更新します
       } else {
         alert(editingId === null ? '登録に失敗しました' : '更新に失敗しました');
       }
@@ -728,7 +798,7 @@
       const res = await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
       if (res.ok) {
         const q = document.getElementById('search-input').value.trim();
-        loadBookmarks(q);
+        loadBookmarks(q, activeTag);
       } else {
         alert('削除に失敗しました');
       }
