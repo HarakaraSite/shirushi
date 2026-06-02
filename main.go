@@ -449,158 +449,140 @@ type BookmarkListResponse struct {
 	Total     int        `json:"total"`     // 絞り込み条件込みの総件数
 }
 
+// addOneMonth："YYYY-MM" 形式の文字列に1ヶ月加算して返します。
+// 日付範囲の上限計算（その月の終わりまで含める）に使います。
+// 例: "2024-03" → "2024-04"
+func addOneMonth(yyyyMM string) string {
+	t, err := time.Parse("2006-01", yyyyMM)
+	if err != nil {
+		return yyyyMM
+	}
+	return t.AddDate(0, 1, 0).Format("2006-01")
+}
+
 // handleGetBookmarks：登録されているブックマークを一覧で返すAPIです。
 // クエリパラメータ:
 //
-//	?q=keyword  タイトル・URL・excerptで絞り込み検索
-//	?tag=name   タグ名で絞り込み
-//	?page=N     ページ番号（デフォルト1、1始まり）
-//	?limit=N    1ページあたりの件数（デフォルト50）
+//	?q=keyword         タイトル・URL・excerptで絞り込み検索
+//	?tag=name          タグ名で絞り込み（"__untagged__" でタグなし絞り込み）
+//	?date_from=YYYY-MM 登録日の開始月（例: 2024-01）
+//	?date_to=YYYY-MM   登録日の終了月（例: 2024-03、その月末まで含む）
+//	?page=N            ページ番号（デフォルト1、1始まり）
+//	?limit=N           1ページあたりの件数（デフォルト50）
 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
-	q   := strings.TrimSpace(r.URL.Query().Get("q"))
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	q        := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag      := strings.TrimSpace(r.URL.Query().Get("tag"))
+	dateFrom := strings.TrimSpace(r.URL.Query().Get("date_from"))
+	dateTo   := strings.TrimSpace(r.URL.Query().Get("date_to"))
 
-	// 1ページあたりの件数（デフォルト50）
 	limit := 50
 	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 200 {
 		limit = l
 	}
-
-	// ページ番号（1始まり）。不正値や未指定は1ページ目にします。
 	page := 1
 	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 1 {
 		page = p
 	}
-	// OFFSET = （ページ番号 - 1）× 件数
-	// 例: page=3, limit=50 → OFFSET=100（101件目から取得）
 	offset := (page - 1) * limit
 
 	// "__untagged__" は「タグが1つも付いていないブックマーク」を表す特殊値です。
-	// フロントエンドの「タグなし」チップがこの値を送ってきます。
 	const untaggedToken = "__untagged__"
 
-	// ── ① 総件数を取得 ──────────────────────────────────────────
-	var total int
-	var countErr error
+	// ── WHERE句を動的に組み立てる ────────────────────────────────
+	// 条件が増えても switch のケース数が爆発しないよう、
+	// 条件文字列を slice に積み上げて最後に JOIN します。
+	//
+	// タグ絞り込みが必要な場合だけ JOIN を追加します。
+	fromClause := "FROM bookmarks b"
+	var conditions []string
+	var args []interface{}
 
+	// タグ条件
 	if tag == untaggedToken {
-		// NOT EXISTS でタグが1件もないブックマークを数えます。
-		if q == "" {
-			countErr = db.QueryRow(`
-				SELECT COUNT(*) FROM bookmarks b
-				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)`,
-			).Scan(&total)
-		} else {
-			like := "%" + q + "%"
-			countErr = db.QueryRow(`
-				SELECT COUNT(*) FROM bookmarks b
-				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
-				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
-				like, like, like).Scan(&total)
+		// NOT EXISTS：bookmark_tags に1件も紐付きがないブックマーク
+		conditions = append(conditions,
+			"NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)")
+	} else if tag != "" {
+		// INNER JOIN でタグに紐付くブックマークだけに絞ります。
+		// DISTINCT は JOIN で行が増えても重複カウントしないために必要です。
+		fromClause += " INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id" +
+			" INNER JOIN tags t ON t.id = bt.tag_id"
+		conditions = append(conditions, "t.name = ?")
+		args = append(args, tag)
+	}
+
+	// キーワード条件
+	if q != "" {
+		like := "%" + q + "%"
+
+		// 日付パターン検出：
+		//   6桁の数字 "202507" → created_at LIKE "2025-07%"（7月全体）
+		//   4桁の数字 "2025"   → created_at LIKE "2025%"  （2025年全体）
+		// strftime は保存フォーマットによって動作しないことがあるため、
+		// 文字列の先頭を直接 LIKE で比較する方式にしています。
+		dateLike := ""
+		if _, err := strconv.Atoi(q); err == nil {
+			switch len(q) {
+			case 6: // YYYYMM → "YYYY-MM%"
+				dateLike = q[:4] + "-" + q[4:6] + "%"
+			case 4: // YYYY   → "YYYY%"
+				dateLike = q + "%"
+			}
 		}
-	} else {
-		switch {
-		case q == "" && tag == "":
-			countErr = db.QueryRow(`SELECT COUNT(*) FROM bookmarks`).Scan(&total)
 
-		case q != "" && tag == "":
-			like := "%" + q + "%"
-			countErr = db.QueryRow(`
-				SELECT COUNT(*) FROM bookmarks
-				WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?`,
-				like, like, like).Scan(&total)
-
-		case q == "" && tag != "":
-			// タグで絞り込む場合は bookmark_tags と JOIN するため DISTINCT が必要です。
-			countErr = db.QueryRow(`
-				SELECT COUNT(DISTINCT b.id)
-				FROM bookmarks b
-				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-				INNER JOIN tags t ON t.id = bt.tag_id
-				WHERE t.name = ?`, tag).Scan(&total)
-
-		default:
-			like := "%" + q + "%"
-			countErr = db.QueryRow(`
-				SELECT COUNT(DISTINCT b.id)
-				FROM bookmarks b
-				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-				INNER JOIN tags t ON t.id = bt.tag_id
-				WHERE t.name = ?
-				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
-				tag, like, like, like).Scan(&total)
+		if dateLike != "" {
+			conditions = append(conditions,
+				"(b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ? OR b.created_at LIKE ?)")
+			args = append(args, like, like, like, dateLike)
+		} else {
+			conditions = append(conditions,
+				"(b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)")
+			args = append(args, like, like, like)
 		}
 	}
-	if countErr != nil {
+
+	// 日付条件（YYYY-MM → SQL の DATETIME と比較）
+	// date_from: その月の1日 00:00:00 以降
+	if dateFrom != "" {
+		conditions = append(conditions, "b.created_at >= ?")
+		args = append(args, dateFrom+"-01 00:00:00")
+	}
+	// date_to: 翌月の1日 00:00:00 未満（= その月末まで含む）
+	if dateTo != "" {
+		conditions = append(conditions, "b.created_at < ?")
+		args = append(args, addOneMonth(dateTo)+"-01 00:00:00")
+	}
+
+	// WHERE句：条件がある場合のみ付けます。
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// ── ① 総件数を取得 ──────────────────────────────────────────
+	// DISTINCT b.id：タグJOINで行が増えても重複カウントを防ぎます。
+	countSQL := fmt.Sprintf("SELECT COUNT(DISTINCT b.id) %s %s", fromClause, whereClause)
+	var total int
+	if err := db.QueryRow(countSQL, args...).Scan(&total); err != nil {
 		http.Error(w, "件数取得エラー", http.StatusInternalServerError)
 		return
 	}
 
 	// ── ② ブックマークをページ単位で取得 ─────────────────────────
-	var rows *sql.Rows
-	var err error
+	// DISTINCT：タグJOINで同じブックマークが複数行になるのを防ぎます。
+	dataSQL := fmt.Sprintf(`
+		SELECT DISTINCT b.id, b.url, b.title, b.excerpt, b.author,
+		       b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+		%s %s
+		ORDER BY b.id DESC
+		LIMIT ? OFFSET ?`, fromClause, whereClause)
 
-	if tag == untaggedToken {
-		if q == "" {
-			rows, err = db.Query(`
-				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-				FROM bookmarks b
-				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
-				ORDER BY b.id DESC
-				LIMIT ? OFFSET ?`, limit, offset)
-		} else {
-			like := "%" + q + "%"
-			rows, err = db.Query(`
-				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-				FROM bookmarks b
-				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
-				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
-				ORDER BY b.id DESC
-				LIMIT ? OFFSET ?`, like, like, like, limit, offset)
-		}
-	} else {
-		switch {
-		case q == "" && tag == "":
-			rows, err = db.Query(`
-				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-				FROM bookmarks
-				ORDER BY id DESC
-				LIMIT ? OFFSET ?`, limit, offset)
-
-		case q != "" && tag == "":
-			like := "%" + q + "%"
-			rows, err = db.Query(`
-				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-				FROM bookmarks
-				WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?
-				ORDER BY id DESC
-				LIMIT ? OFFSET ?`,
-				like, like, like, limit, offset)
-
-		case q == "" && tag != "":
-			rows, err = db.Query(`
-				SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
-				FROM bookmarks b
-				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-				INNER JOIN tags t ON t.id = bt.tag_id
-				WHERE t.name = ?
-				ORDER BY b.id DESC
-				LIMIT ? OFFSET ?`,
-				tag, limit, offset)
-
-		default:
-			like := "%" + q + "%"
-			rows, err = db.Query(`
-				SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
-				FROM bookmarks b
-				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-				INNER JOIN tags t ON t.id = bt.tag_id
-				WHERE t.name = ?
-				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
-				ORDER BY b.id DESC
-				LIMIT ? OFFSET ?`,
-				tag, like, like, like, limit, offset)
-		}
+	// LIMIT / OFFSET は args の後ろに追加します。
+	dataArgs := append(args, limit, offset)
+	rows, err := db.Query(dataSQL, dataArgs...)
+	if err != nil {
+		http.Error(w, "データベースエラー", http.StatusInternalServerError)
+		return
 	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)

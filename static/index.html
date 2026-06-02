@@ -754,6 +754,7 @@
       }, 300);
     });
 
+
     // ===== データ取得 =====
 
     async function loadTags() {
@@ -808,8 +809,8 @@
 
       // クエリパラメータを組み立てます。
       const params = new URLSearchParams();
-      if (q)      params.set('q',    q);
-      if (tag)    params.set('tag',  tag);
+      if (q)        params.set('q',    q);
+      if (tag)      params.set('tag',  tag);
       if (page > 1) params.set('page', page);
       const qs = params.toString();
       const url = qs ? `/api/bookmarks?${qs}` : '/api/bookmarks';
