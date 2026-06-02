@@ -1,6 +1,6 @@
 # Shirushi 機能詳細ドキュメント
 
-> 更新日: 2026-05-29
+> 更新日: 2026-06-02
 
 ---
 
@@ -25,7 +25,7 @@
 |---------|------|
 | バックエンド | Go 1.22 / `net/http` |
 | データベース | SQLite (`modernc.org/sqlite`) |
-| フロントエンド | Vanilla JS / HTML / CSS（ライブラリなし） |
+| フロントエンド | Vanilla JS / HTML / Pico CSS（classless） + 独自CSS |
 | 静的ファイル配信 | `//go:embed static` でバイナリに同梱 |
 
 ---
@@ -102,7 +102,7 @@ CREATE TABLE bookmark_tags (
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/bookmarks` | 一覧取得（検索・タグ絞り込み・件数制限対応） |
+| GET | `/api/bookmarks` | 一覧取得（検索・タグ絞り込み・ページネーション対応） |
 | POST | `/api/bookmarks` | 新規登録 |
 | PUT | `/api/bookmarks/{id}` | 更新 |
 | DELETE | `/api/bookmarks/{id}` | 1件削除 |
@@ -113,44 +113,47 @@ CREATE TABLE bookmark_tags (
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
 | `q` | string | - | タイトル・URL・抜粋の部分一致検索（LIKE） |
-| `tag` | string | - | タグ名で絞り込み（INNER JOIN） |
-| `limit` | int | 100 | 取得件数上限（最大500） |
+| `tag` | string | - | タグ名で絞り込み（INNER JOIN）。`__untagged__` でタグなし絞り込み |
+| `page` | int | 1 | ページ番号（1始まり） |
+| `limit` | int | 50 | 1ページあたりの取得件数（最大200） |
 
-`q` と `tag` は組み合わせ可能。4パターンを `switch` で分岐。
+`q` と `tag` は組み合わせ可能。
 
-### リクエスト/レスポンス例
+### レスポンス形式
 
 ```json
-// POST /api/bookmarks リクエスト
+// GET /api/bookmarks レスポンス
 {
-  "url": "https://example.com",
-  "title": "例のサイト",
-  "excerpt": "メモ",
-  "author": "著者名",
-  "image_url": "https://example.com/og.png",
-  "tags": [{"id": 1}, {"id": 2}]
-}
-
-// レスポンス（201 Created）
-{
-  "id": 42,
-  "url": "https://example.com",
-  "title": "例のサイト",
-  "excerpt": "メモ",
-  "author": "著者名",
-  "image_url": "https://example.com/og.png",
-  "created_at": "2026-05-29T12:00:00Z",
-  "modified_at": null,
-  "tags": [{"id": 1, "name": "go"}, {"id": 2, "name": "web"}]
+  "bookmarks": [
+    {
+      "id": 42,
+      "url": "https://example.com",
+      "title": "例のサイト",
+      "excerpt": "メモ",
+      "author": "著者名",
+      "image_url": "https://example.com/og.png",
+      "created_at": "2026-05-29T12:00:00Z",
+      "modified_at": null,
+      "tags": [{"id": 1, "name": "go"}, {"id": 2, "name": "web"}]
+    }
+  ],
+  "total": 477
 }
 ```
+
+`total` は絞り込み条件込みの総件数。フロントエンドはこれを使ってページ数を計算します。
+
+### ページネーション
+
+- OFFSET方式: `OFFSET = (page - 1) × limit`
+- 総件数と一覧を1レスポンスで返す（別途COUNTクエリを発行）
 
 ### N+1クエリ対策
 
 タグ取得を **2クエリ固定** で処理しています。
 
 ```
-クエリ①: ブックマーク一覧を取得（LIMIT付き）
+クエリ①: ブックマーク一覧を取得（LIMIT / OFFSET付き）
 クエリ②: 全ブックマークIDを IN句 に渡してタグを一括取得
          → Go側でマップ（O(1)）を使って各ブックマークに振り分け
 ```
@@ -163,14 +166,24 @@ CREATE TABLE bookmark_tags (
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/tags` | タグ一覧取得 |
-| POST | `/api/tags` | タグ新規作成 |
+| GET | `/api/tags` | 使用中タグ一覧取得（ブックマークに1件以上紐付くタグのみ） |
+| POST | `/api/tags` | タグ新規作成（同名タグが既存なら既存を返す） |
 | PUT | `/api/tags/{id}` | タグ名変更 |
 | DELETE | `/api/tags/{id}` | タグ削除 |
 | POST | `/api/bookmarks/{id}/tags` | ブックマークにタグを追加 |
 | DELETE | `/api/bookmarks/{id}/tags` | ブックマークからタグを削除 |
 | POST | `/api/bookmarks/bulk/tags` | 複数ブックマークにタグを一括追加 |
 | DELETE | `/api/bookmarks/bulk/tags` | 複数ブックマークからタグを一括削除 |
+
+### GET /api/tags の仕様
+
+`INNER JOIN bookmark_tags` で**使用中のタグのみ**返します。  
+ブックマークに1件も紐付いていないタグはフィルターチップ・オートコンプリートに表示されません。
+
+### POST /api/tags の仕様
+
+`INSERT OR IGNORE` + `SELECT` の2ステップで処理します。  
+同名タグが既に存在する場合（未使用タグ含む）も競合エラーにならず、正しいIDを返します。
 
 ### 一括タグ API リクエスト例
 
@@ -202,18 +215,8 @@ URLにアクセスし、HTMLから正規表現で以下を抽出します。
 | `author` | `<meta name="author">` |
 | `image_url` | `<og:image>` |
 
-```json
-// レスポンス例
-{
-  "title": "The Go Programming Language",
-  "excerpt": "Go is an open source programming language...",
-  "author": "",
-  "image_url": "https://go.dev/images/og-v2.png"
-}
-```
-
 - レスポンスボディは最大 **1MB** に制限（`io.LimitReader`）
-- 外部接続なしのURLは空レスポンスを返す
+- User-Agent を設定してアクセス拒否を回避
 
 ---
 
@@ -228,8 +231,10 @@ URLにアクセスし、HTMLから正規表現で以下を抽出します。
 
 - `multipart/form-data` でHTMLファイルを受け取る
 - `<a href="..." add_date="...">タイトル</a>` の形式を正規表現でパース
+- タグ（`TAGS="..."` 属性）も読み込み、存在しないタグは自動作成
 - 重複URL（UNIQUE制約）は `INSERT OR IGNORE` でスキップ
 - レスポンス: `{"imported": 5, "skipped": 2}`
+- ※ インポート時のサムネイル（OG画像）取得は未対応
 
 ### エクスポート仕様
 
@@ -241,7 +246,7 @@ Shiori互換の Netscape Bookmark HTML を生成して配信します。
 <TITLE>Bookmarks</TITLE>
 <H1>Bookmarks</H1>
 <DL><p>
-    <DT><A HREF="https://example.com" ADD_DATE="1748476800">例のサイト</A>
+    <DT><A HREF="https://example.com" ADD_DATE="1748476800" TAGS="go,web">例のサイト</A>
     ...
 </DL><p>
 ```
@@ -256,11 +261,28 @@ Shiori互換の Netscape Bookmark HTML を生成して配信します。
 ログイン画面  →（認証成功）→  メイン画面
                                ├── ヘッダー（追加/エクスポート/インポート/ログアウト）
                                ├── 検索バー
-                               ├── タグフィルターチップ
+                               ├── タグフィルターチップ（タグなし含む）
                                ├── バッチ操作バー（選択時のみ表示）
-                               └── ブックマーク一覧
+                               ├── ブックマーク一覧（グリッド）
+                               └── ページネーション
                                      モーダル（追加/編集）
 ```
+
+### グリッドレイアウト
+
+- CSS Grid（`auto-fill, minmax(260px, 1fr)`）でレスポンシブ対応
+- 画面幅に応じて自動で2〜4列に変化
+- カード上部にサムネイル（160px高）、下部にタイトル・URL・タグ・日付・ボタン
+- 同一行のカードは高さが揃う（`align-items: stretch` デフォルト）
+- フッター（日付・ボタン）は `margin-top: auto` で常に下端に配置
+
+### ページネーション
+
+- 1ページ50件、`?page=N` でサーバーから切り出し
+- 「← 前へ」「次へ →」ボタン + ページ番号ボタン
+- ページ数が多い場合は現在ページ前後2ページ＋先頭・末尾を表示し、間を `…` で省略
+- ページ移動時は画面上部にスクロール
+- 検索・タグフィルターが変わった場合は自動で1ページ目にリセット
 
 ### 検索
 
@@ -285,29 +307,31 @@ Shiori互換の Netscape Bookmark HTML を生成して配信します。
 
 ### タグ入力（オートコンプリート）
 
-- 入力文字で既存タグを絞り込んでドロップダウン表示
+- 入力文字で既存タグ（使用中のもの）を絞り込んでドロップダウン表示
 - **Enter キー**で確定
   - 既存タグ → 選択して追加
-  - 未登録タグ → `POST /api/tags` で新規作成してから追加
+  - 未登録タグ → `POST /api/tags` で作成してから追加（未使用タグと同名でも競合しない）
 - バッジ表示・×ボタンで取り消し可能
 
 ### タグフィルターチップ
 
-- 全タグをチップとして検索バー下に表示
-- クリックで絞り込み（アクティブ状態は枠線で表示）
+- 使用中のタグをチップとして検索バー下に表示
+- 先頭に「**タグなし**」チップ（タグが付いていないブックマークを絞り込む）
+- クリックで絞り込み → 選択中チップは**青ベタ**にハイライト
 - 再クリックで絞り込み解除
 - 検索キーワードとの同時適用対応
 
 ### サムネイル表示
 
-- OG画像があるサイト → 80×60px にトリミングして表示（`object-fit: cover`）
+- OG画像があるサイト → カード上部全幅（160px高）にトリミング表示（`object-fit: cover`）
 - OG画像がないサイト → グレーのブックマークアイコン（SVG data URI）を表示
 - 画像URL読み込み失敗 → `onerror` で自動的にプレースホルダーへ切り替え
 - `loading="lazy"` でスクロール時の遅延読み込み
 
 ### バッチ操作
 
-各ブックマークカードにチェックボックスを表示。1件以上選択すると青いバッチ操作バーが出現します。
+各ブックマークカードのチェックボックス（サムネイル左上）で複数選択できます。  
+1件以上選択すると青いバッチ操作バーが出現します。
 
 | ボタン | 動作 |
 |--------|------|
@@ -355,6 +379,17 @@ go test -v -cover ./...
 | `TestHandleCreateBookmark_MissingURL` | URL未指定で400が返る |
 | `TestHandleUpdateBookmark_Success` | 存在するIDで200と更新後データが返る |
 | `TestHandleUpdateBookmark_NotFound` | 存在しないIDで404が返る |
+
+> **注意**: テストは旧レスポンス形式（`[]Bookmark`）のままのため、ページネーション対応のレスポンス形式（`{bookmarks, total}`）への更新が必要です。
+
+---
+
+## 未実装・今後の課題
+
+| 項目 | 内容 |
+|------|------|
+| インポート時のサムネイル取得 | インポート後はOG画像が取得されないためプレースホルダーになる |
+| タグ管理画面 | 未使用タグの一覧・削除UI（APIは実装済み） |
 
 ---
 

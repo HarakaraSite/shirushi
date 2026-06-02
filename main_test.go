@@ -56,14 +56,18 @@ func TestHandleGetBookmarks_Empty(t *testing.T) {
 	}
 
 	// レスポンスボディをJSONとして読み取ります。
-	var bookmarks []Bookmark
-	if err := json.NewDecoder(w.Body).Decode(&bookmarks); err != nil {
+	// GET /api/bookmarks は { "bookmarks": [...], "total": N } 形式で返します。
+	var resp BookmarkListResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("JSONの解析に失敗しました: %v", err)
 	}
 
 	// データが0件であることを確認します。
-	if len(bookmarks) != 0 {
-		t.Errorf("件数が違います: got %d, want 0", len(bookmarks))
+	if len(resp.Bookmarks) != 0 {
+		t.Errorf("件数が違います: got %d, want 0", len(resp.Bookmarks))
+	}
+	if resp.Total != 0 {
+		t.Errorf("totalが違います: got %d, want 0", resp.Total)
 	}
 }
 
@@ -88,22 +92,25 @@ func TestHandleGetBookmarks_WithData(t *testing.T) {
 		t.Errorf("ステータスコードが違います: got %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var bookmarks []Bookmark
-	if err := json.NewDecoder(w.Body).Decode(&bookmarks); err != nil {
+	var resp BookmarkListResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("JSONの解析に失敗しました: %v", err)
 	}
 
 	// 1件返ってくることを確認します。
-	if len(bookmarks) != 1 {
-		t.Errorf("件数が違います: got %d, want 1", len(bookmarks))
+	if len(resp.Bookmarks) != 1 {
+		t.Errorf("件数が違います: got %d, want 1", len(resp.Bookmarks))
+	}
+	if resp.Total != 1 {
+		t.Errorf("totalが違います: got %d, want 1", resp.Total)
 	}
 
 	// 内容が正しいか確認します。
-	if bookmarks[0].URL != "https://example.com" {
-		t.Errorf("URLが違います: got %s, want https://example.com", bookmarks[0].URL)
+	if resp.Bookmarks[0].URL != "https://example.com" {
+		t.Errorf("URLが違います: got %s, want https://example.com", resp.Bookmarks[0].URL)
 	}
-	if bookmarks[0].Title != "テスト" {
-		t.Errorf("タイトルが違います: got %s, want テスト", bookmarks[0].Title)
+	if resp.Bookmarks[0].Title != "テスト" {
+		t.Errorf("タイトルが違います: got %s, want テスト", resp.Bookmarks[0].Title)
 	}
 }
 
