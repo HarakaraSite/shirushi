@@ -6,3 +6,8 @@ shirushi
 
 # Shioriの参照用クローン（サブモジュールではないため除外）
 _refs/shiori/
+
+# Playwright スナップショット・スクリーンショット（一時ファイル）
+.playwright-cli/
+*.png
+*.webm
