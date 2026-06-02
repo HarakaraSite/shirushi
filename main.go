@@ -442,48 +442,104 @@ func migrateAddUniqueURL() {
 	}
 }
 
+// BookmarkListResponse：ブックマーク一覧APIのレスポンス形式です。
+// ページネーションのために、ブックマーク本体と総件数をまとめて返します。
+type BookmarkListResponse struct {
+	Bookmarks []Bookmark `json:"bookmarks"` // 現在ページのブックマーク
+	Total     int        `json:"total"`     // 絞り込み条件込みの総件数
+}
+
 // handleGetBookmarks：登録されているブックマークを一覧で返すAPIです。
 // クエリパラメータ:
-//   ?q=keyword  タイトル・URL・excerptで絞り込み検索
-//   ?tag=name   タグ名で絞り込み
-//   ?limit=N    取得件数上限（デフォルト100、最大500）
+//
+//	?q=keyword  タイトル・URL・excerptで絞り込み検索
+//	?tag=name   タグ名で絞り込み
+//	?page=N     ページ番号（デフォルト1、1始まり）
+//	?limit=N    1ページあたりの件数（デフォルト50）
 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	q   := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 
-	// 件数上限を取得します。指定なし・不正値はデフォルト100件にします。
-	limit := 100
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 500 {
+	// 1ページあたりの件数（デフォルト50）
+	limit := 50
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 200 {
 		limit = l
 	}
 
+	// ページ番号（1始まり）。不正値や未指定は1ページ目にします。
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 1 {
+		page = p
+	}
+	// OFFSET = （ページ番号 - 1）× 件数
+	// 例: page=3, limit=50 → OFFSET=100（101件目から取得）
+	offset := (page - 1) * limit
+
+	// ── ① 総件数を取得 ──────────────────────────────────────────
+	// ページ数の計算に使います。絞り込み条件と同じ WHERE 句を使う必要があります。
+	var total int
+	var countErr error
+	switch {
+	case q == "" && tag == "":
+		countErr = db.QueryRow(`SELECT COUNT(*) FROM bookmarks`).Scan(&total)
+
+	case q != "" && tag == "":
+		like := "%" + q + "%"
+		countErr = db.QueryRow(`
+			SELECT COUNT(*) FROM bookmarks
+			WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?`,
+			like, like, like).Scan(&total)
+
+	case q == "" && tag != "":
+		// タグで絞り込む場合は bookmark_tags と JOIN するため DISTINCT が必要です。
+		// （同じブックマークに同じタグが複数紐付く可能性はないですが、JOIN で行が増えるため）
+		countErr = db.QueryRow(`
+			SELECT COUNT(DISTINCT b.id)
+			FROM bookmarks b
+			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+			INNER JOIN tags t ON t.id = bt.tag_id
+			WHERE t.name = ?`, tag).Scan(&total)
+
+	default:
+		like := "%" + q + "%"
+		countErr = db.QueryRow(`
+			SELECT COUNT(DISTINCT b.id)
+			FROM bookmarks b
+			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+			INNER JOIN tags t ON t.id = bt.tag_id
+			WHERE t.name = ?
+			  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
+			tag, like, like, like).Scan(&total)
+	}
+	if countErr != nil {
+		http.Error(w, "件数取得エラー", http.StatusInternalServerError)
+		return
+	}
+
+	// ── ② ブックマークをページ単位で取得 ─────────────────────────
+	// LIMIT で取得件数を、OFFSET で開始位置を指定してページを切り出します。
 	var rows *sql.Rows
 	var err error
 
-	// q（キーワード）と tag（タグ名）の組み合わせで4パターンに分岐します。
-	// タグ絞り込みがある場合は bookmark_tags・tags テーブルと JOIN します。
 	switch {
 	case q == "" && tag == "":
-		// 絞り込みなし：新しい順に全件取得します。
 		rows, err = db.Query(`
 			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
 			FROM bookmarks
 			ORDER BY id DESC
-			LIMIT ?`, limit)
+			LIMIT ? OFFSET ?`, limit, offset)
 
 	case q != "" && tag == "":
-		// キーワード検索のみ：LIKE で部分一致します。
 		like := "%" + q + "%"
 		rows, err = db.Query(`
 			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
 			FROM bookmarks
 			WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?
 			ORDER BY id DESC
-			LIMIT ?`,
-			like, like, like, limit)
+			LIMIT ? OFFSET ?`,
+			like, like, like, limit, offset)
 
 	case q == "" && tag != "":
-		// タグ絞り込みのみ：INNER JOIN でタグに紐付くブックマークだけ取得します。
 		rows, err = db.Query(`
 			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
 			FROM bookmarks b
@@ -491,11 +547,10 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 			INNER JOIN tags t ON t.id = bt.tag_id
 			WHERE t.name = ?
 			ORDER BY b.id DESC
-			LIMIT ?`,
-			tag, limit)
+			LIMIT ? OFFSET ?`,
+			tag, limit, offset)
 
 	default:
-		// キーワード＋タグ絞り込み：両方の条件を AND で組み合わせます。
 		like := "%" + q + "%"
 		rows, err = db.Query(`
 			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
@@ -505,16 +560,16 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 			WHERE t.name = ?
 			  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
 			ORDER BY b.id DESC
-			LIMIT ?`,
-			tag, like, like, like, limit)
+			LIMIT ? OFFSET ?`,
+			tag, like, like, like, limit, offset)
 	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
 	}
 
-	// まず全ブックマークを取得してrowsを閉じます。
-	// rowsが開いたまま別のクエリを実行するとSQLiteでエラーになることがあるためです。
+	// rowsが開いたまま別のクエリを実行するとSQLiteでエラーになることがあるため、
+	// まず全ブックマークをスライスに読み出してからrowsを閉じます。
 	var bookmarks []Bookmark
 	for rows.Next() {
 		var b Bookmark
@@ -528,37 +583,30 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 		bookmarks = append(bookmarks, b)
 	}
-	rows.Close() // タグ取得の前に明示的に閉じます。
+	rows.Close()
 
-	// N+1クエリ問題を避けるため、タグを1回のSQLで一括取得します。
-	// NG例（N+1）: ブックマークが1000件あると1001回クエリが走る
-	//   for i := range bookmarks { bookmarks[i].Tags = getTagsByBookmarkID(...) }
-	// OK例（2クエリ固定）: 全ブックマークIDをまとめてINで渡す
+	// ── ③ タグを2クエリ固定で一括取得 ───────────────────────────
+	// N+1クエリ問題を避けるため、対象ブックマークのIDをまとめてINで渡します。
 	if len(bookmarks) > 0 {
-		// 取得したブックマークのIDをスライスにまとめます。
 		ids := make([]int, len(bookmarks))
 		for i, b := range bookmarks {
 			ids[i] = b.ID
 		}
 
-		// IDをマップのキーとして、ブックマークの添字を素早く引けるようにします。
-		// map[bookmarkID] = bookmarksスライスの添字
+		// map[bookmarkID] = bookmarksスライスの添字（O(1) で位置を引くため）
 		idxByID := make(map[int]int, len(bookmarks))
 		for i, b := range bookmarks {
 			idxByID[b.ID] = i
 		}
 
-		// SQLの IN句 に渡すプレースホルダー（?,?,?...）を動的に生成します。
 		placeholders := strings.Repeat("?,", len(ids))
-		placeholders = placeholders[:len(placeholders)-1] // 末尾のカンマを除去
+		placeholders = placeholders[:len(placeholders)-1]
 
-		// args は interface{} のスライスとして各IDを渡す必要があります。
 		args := make([]interface{}, len(ids))
 		for i, id := range ids {
 			args[i] = id
 		}
 
-		// 対象ブックマークのタグを1回のJOINクエリでまとめて取得します。
 		tagRows, err := db.Query(fmt.Sprintf(`
 			SELECT bt.bookmark_id, t.id, t.name
 			FROM tags t
@@ -571,7 +619,6 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tagRows.Close()
 
-		// 取得したタグ行を対応するブックマークに割り当てます。
 		for tagRows.Next() {
 			var bookmarkID int
 			var tag Tag
@@ -579,21 +626,25 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "タグ読み取りエラー", http.StatusInternalServerError)
 				return
 			}
-			// idxByID でブックマークの位置をO(1)で特定してタグを追加します。
 			if idx, ok := idxByID[bookmarkID]; ok {
 				bookmarks[idx].Tags = append(bookmarks[idx].Tags, tag)
 			}
 		}
 	}
 
-	// nilスライスをそのままJSONにすると null になるため、空スライスで初期化します。
+	// nil スライスをそのままJSONにすると null になるため、空スライスで初期化します。
 	if bookmarks == nil {
 		bookmarks = []Bookmark{}
 	}
 
-	// データをJSON形式に変換してブラウザに返します。
+	// ── ④ レスポンス ─────────────────────────────────────────────
+	// bookmarks（現在ページ分）と total（全件数）をまとめて返します。
+	// フロントエンドはこれを使ってページ数とナビゲーションを計算します。
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bookmarks)
+	json.NewEncoder(w).Encode(BookmarkListResponse{
+		Bookmarks: bookmarks,
+		Total:     total,
+	})
 }
 
 // syncBookmarkTags：ブックマークのタグ紐付けを同期するヘルパー関数です。
