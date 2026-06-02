@@ -480,6 +480,18 @@
     }
 
     /* ===== タグ管理モーダル ===== */
+    /* display:none をインラインではなくCSSで定義します。
+       インラインスタイルは詳細度が高く .open による上書きができないためです。 */
+    #tag-manager-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
     #tag-manager-overlay.open {
       display: flex;
     }
@@ -712,10 +724,7 @@
   </div>
 
   <!-- ===== タグ管理モーダル ===== -->
-  <div id="tag-manager-overlay" onclick="onTagManagerOverlayClick(event)" style="
-      display:none; position:fixed; inset:0;
-      background:rgba(0,0,0,0.5); z-index:100;
-      align-items:center; justify-content:center;">
+  <div id="tag-manager-overlay" onclick="onTagManagerOverlayClick(event)">
     <div id="tag-manager-box" style="
         background:#fff; border-radius:8px; padding:24px;
         width:100%; max-width:400px; max-height:80vh;

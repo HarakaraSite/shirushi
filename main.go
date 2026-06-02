@@ -71,6 +71,14 @@ func main() {
 		log.Fatal("データベース接続エラー:", err)
 	}
 	defer db.Close()
+
+	// SQLite は外部キー制約がデフォルト無効のため、明示的に有効化します。
+	// これにより bookmark_tags の ON DELETE CASCADE が正しく動作します。
+	// （タグ削除時に bookmark_tags の関連行が自動削除される）
+	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		log.Fatal("外部キー設定エラー:", err)
+	}
+
 	// 2. テーブルが存在しない場合は作成します。
 	createTable()
 	// 3. 既存DBに新しいカラムを追加するマイグレーションを実行します。
