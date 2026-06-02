@@ -479,6 +479,44 @@
       background: #f0f4ff;
     }
 
+    /* ===== タグ管理モーダル ===== */
+    #tag-manager-overlay.open {
+      display: flex;
+    }
+
+    .tag-manager-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 4px;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.9rem;
+    }
+
+    .tag-manager-item:last-child {
+      border-bottom: none;
+    }
+
+    /* 未使用タグはグレーで表示して区別します */
+    .tag-manager-item.unused {
+      color: #aaa;
+    }
+
+    .tag-manager-item .tag-delete-btn {
+      background: #e00;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 3px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .tag-manager-item .tag-delete-btn:hover {
+      background: #c00;
+    }
+
     /* ===== ページネーション ===== */
     #pagination {
       display: flex;
@@ -590,6 +628,7 @@
           <button type="button" onclick="this.parentElement.querySelector('input').click()">インポート</button>
           <input type="file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
         </label>
+        <button type="button" onclick="openTagManager()" style="background:#555;">タグ管理</button>
         <button type="button" onclick="logout()" style="background:#888;">ログアウト</button>
       </div>
     </div>
@@ -630,6 +669,7 @@
         </div>
       </div>
 
+      <button type="button" onclick="selectAll()">全て選択</button>
       <button type="button" onclick="bulkDelete()">一括削除</button>
       <button type="button" class="bulk-cancel" onclick="clearSelection()" style="background:transparent; color:#fff; padding:4px 8px;">✕ 選択解除</button>
     </div>
@@ -668,6 +708,22 @@
           <button type="button" class="btn-cancel" onclick="closeModal()">キャンセル</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ===== タグ管理モーダル ===== -->
+  <div id="tag-manager-overlay" onclick="onTagManagerOverlayClick(event)" style="
+      display:none; position:fixed; inset:0;
+      background:rgba(0,0,0,0.5); z-index:100;
+      align-items:center; justify-content:center;">
+    <div id="tag-manager-box" style="
+        background:#fff; border-radius:8px; padding:24px;
+        width:100%; max-width:400px; max-height:80vh;
+        overflow-y:auto; display:flex; flex-direction:column; gap:12px;">
+      <h2 style="font-size:1.1rem;">タグ管理</h2>
+      <p style="font-size:0.85rem; color:#888;">未使用タグも含めて表示しています。</p>
+      <div id="tag-manager-list"></div>
+      <button type="button" class="btn-cancel" onclick="closeTagManager()">閉じる</button>
     </div>
   </div>
 
@@ -882,6 +938,77 @@
 
         </div>
       `).join('');
+    }
+
+    // ===== タグ管理 =====
+
+    // タグ管理モーダルを開きます。全タグ（未使用含む）を取得して表示します。
+    async function openTagManager() {
+      document.getElementById('tag-manager-overlay').classList.add('open');
+      await renderTagManagerList();
+    }
+
+    function closeTagManager() {
+      document.getElementById('tag-manager-overlay').classList.remove('open');
+    }
+
+    function onTagManagerOverlayClick(e) {
+      if (e.target === document.getElementById('tag-manager-overlay')) closeTagManager();
+    }
+
+    // 全タグ一覧を描画します。
+    // ?all=1 で未使用タグも取得します。使用中タグとの区別は usedIds で判定します。
+    async function renderTagManagerList() {
+      const listEl = document.getElementById('tag-manager-list');
+      listEl.innerHTML = '<p style="color:#888; font-size:0.85rem;">読み込み中...</p>';
+
+      // 全タグ（未使用含む）を取得します。
+      const [allRes, usedRes] = await Promise.all([
+        fetch('/api/tags?all=1'),
+        fetch('/api/tags'),
+      ]);
+      const allTagsList  = await allRes.json()  ?? [];
+      const usedTagsList = await usedRes.json() ?? [];
+
+      // 使用中タグのIDをSetに入れてO(1)で参照できるようにします。
+      const usedIds = new Set(usedTagsList.map(t => t.id));
+
+      if (allTagsList.length === 0) {
+        listEl.innerHTML = '<p style="color:#888; font-size:0.85rem;">タグがありません。</p>';
+        return;
+      }
+
+      listEl.innerHTML = allTagsList.map(t => {
+        const isUsed = usedIds.has(t.id);
+        return `
+          <div class="tag-manager-item ${isUsed ? '' : 'unused'}">
+            <span>${escapeHtml(t.name)}${isUsed ? '' : ' <small>(未使用)</small>'}</span>
+            <button class="tag-delete-btn" onclick="deleteTag(${t.id}, '${escapeHtml(t.name)}')">削除</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // タグを削除します。削除後は一覧を再描画します。
+    async function deleteTag(id, name) {
+      if (!confirm(`タグ「${name}」を削除しますか？\n※このタグが付いたブックマークからも外れます。`)) return;
+
+      const res = await fetch(`/api/tags/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        alert('削除に失敗しました');
+        return;
+      }
+
+      // タグ一覧とフィルターチップを更新します。
+      await Promise.all([
+        renderTagManagerList(),
+        loadTags(),
+      ]);
+      // 現在の検索・フィルター状態を維持したまま一覧を再読み込みします。
+      const q = document.getElementById('search-input').value.trim();
+      // 削除したタグがアクティブフィルターだった場合は解除します。
+      if (activeTag === name) activeTag = null;
+      loadBookmarks(q, activeTag, currentPage);
     }
 
     // ===== ページネーション =====
@@ -1260,6 +1387,18 @@
       updateBulkBar();
       closeBulkTagDropdown();
       closeBulkTagRemoveDropdown();
+    }
+
+    // 現在表示中のブックマークをすべて選択します。
+    // data-id 属性からIDを取得して selectedIds に追加します。
+    function selectAll() {
+      document.querySelectorAll('.bookmark-item[data-id]').forEach(el => {
+        const id = parseInt(el.dataset.id, 10);
+        selectedIds.add(id);
+        const cb = el.querySelector('.bookmark-checkbox');
+        if (cb) cb.checked = true;
+      });
+      updateBulkBar();
     }
 
     // ===== 一括タグ追加 =====

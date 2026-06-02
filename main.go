@@ -1174,15 +1174,24 @@ func handleRemoveTagFromBookmark(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleGetTags：ブックマークに使われているタグを一覧で返すAPIです。
-// INNER JOIN で bookmark_tags に1件以上紐付くタグだけを返します。
-// タグを作成しても1件もブックマークに付けていない場合は表示されません。
+// handleGetTags：タグ一覧を返すAPIです。
+// デフォルトはブックマークに使われているタグのみ返します。
+// ?all=1 を付けると未使用タグも含めた全タグを返します（タグ管理画面用）。
 func handleGetTags(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`
-		SELECT DISTINCT t.id, t.name
-		FROM tags t
-		INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
-		ORDER BY t.name ASC`)
+	var rows *sql.Rows
+	var err error
+
+	if r.URL.Query().Get("all") == "1" {
+		// 全タグ（未使用含む）を返します。
+		rows, err = db.Query(`SELECT id, name FROM tags ORDER BY name ASC`)
+	} else {
+		// 使用中のタグのみ返します（フィルターチップ・オートコンプリート用）。
+		rows, err = db.Query(`
+			SELECT DISTINCT t.id, t.name
+			FROM tags t
+			INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
+			ORDER BY t.name ASC`)
+	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
