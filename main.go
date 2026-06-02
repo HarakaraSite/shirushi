@@ -475,41 +475,61 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	// 例: page=3, limit=50 → OFFSET=100（101件目から取得）
 	offset := (page - 1) * limit
 
+	// "__untagged__" は「タグが1つも付いていないブックマーク」を表す特殊値です。
+	// フロントエンドの「タグなし」チップがこの値を送ってきます。
+	const untaggedToken = "__untagged__"
+
 	// ── ① 総件数を取得 ──────────────────────────────────────────
-	// ページ数の計算に使います。絞り込み条件と同じ WHERE 句を使う必要があります。
 	var total int
 	var countErr error
-	switch {
-	case q == "" && tag == "":
-		countErr = db.QueryRow(`SELECT COUNT(*) FROM bookmarks`).Scan(&total)
 
-	case q != "" && tag == "":
-		like := "%" + q + "%"
-		countErr = db.QueryRow(`
-			SELECT COUNT(*) FROM bookmarks
-			WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?`,
-			like, like, like).Scan(&total)
+	if tag == untaggedToken {
+		// NOT EXISTS でタグが1件もないブックマークを数えます。
+		if q == "" {
+			countErr = db.QueryRow(`
+				SELECT COUNT(*) FROM bookmarks b
+				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)`,
+			).Scan(&total)
+		} else {
+			like := "%" + q + "%"
+			countErr = db.QueryRow(`
+				SELECT COUNT(*) FROM bookmarks b
+				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
+				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
+				like, like, like).Scan(&total)
+		}
+	} else {
+		switch {
+		case q == "" && tag == "":
+			countErr = db.QueryRow(`SELECT COUNT(*) FROM bookmarks`).Scan(&total)
 
-	case q == "" && tag != "":
-		// タグで絞り込む場合は bookmark_tags と JOIN するため DISTINCT が必要です。
-		// （同じブックマークに同じタグが複数紐付く可能性はないですが、JOIN で行が増えるため）
-		countErr = db.QueryRow(`
-			SELECT COUNT(DISTINCT b.id)
-			FROM bookmarks b
-			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-			INNER JOIN tags t ON t.id = bt.tag_id
-			WHERE t.name = ?`, tag).Scan(&total)
+		case q != "" && tag == "":
+			like := "%" + q + "%"
+			countErr = db.QueryRow(`
+				SELECT COUNT(*) FROM bookmarks
+				WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?`,
+				like, like, like).Scan(&total)
 
-	default:
-		like := "%" + q + "%"
-		countErr = db.QueryRow(`
-			SELECT COUNT(DISTINCT b.id)
-			FROM bookmarks b
-			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-			INNER JOIN tags t ON t.id = bt.tag_id
-			WHERE t.name = ?
-			  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
-			tag, like, like, like).Scan(&total)
+		case q == "" && tag != "":
+			// タグで絞り込む場合は bookmark_tags と JOIN するため DISTINCT が必要です。
+			countErr = db.QueryRow(`
+				SELECT COUNT(DISTINCT b.id)
+				FROM bookmarks b
+				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+				INNER JOIN tags t ON t.id = bt.tag_id
+				WHERE t.name = ?`, tag).Scan(&total)
+
+		default:
+			like := "%" + q + "%"
+			countErr = db.QueryRow(`
+				SELECT COUNT(DISTINCT b.id)
+				FROM bookmarks b
+				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+				INNER JOIN tags t ON t.id = bt.tag_id
+				WHERE t.name = ?
+				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)`,
+				tag, like, like, like).Scan(&total)
+		}
 	}
 	if countErr != nil {
 		http.Error(w, "件数取得エラー", http.StatusInternalServerError)
@@ -517,51 +537,70 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── ② ブックマークをページ単位で取得 ─────────────────────────
-	// LIMIT で取得件数を、OFFSET で開始位置を指定してページを切り出します。
 	var rows *sql.Rows
 	var err error
 
-	switch {
-	case q == "" && tag == "":
-		rows, err = db.Query(`
-			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-			FROM bookmarks
-			ORDER BY id DESC
-			LIMIT ? OFFSET ?`, limit, offset)
+	if tag == untaggedToken {
+		if q == "" {
+			rows, err = db.Query(`
+				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+				FROM bookmarks b
+				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
+				ORDER BY b.id DESC
+				LIMIT ? OFFSET ?`, limit, offset)
+		} else {
+			like := "%" + q + "%"
+			rows, err = db.Query(`
+				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+				FROM bookmarks b
+				WHERE NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)
+				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
+				ORDER BY b.id DESC
+				LIMIT ? OFFSET ?`, like, like, like, limit, offset)
+		}
+	} else {
+		switch {
+		case q == "" && tag == "":
+			rows, err = db.Query(`
+				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+				FROM bookmarks
+				ORDER BY id DESC
+				LIMIT ? OFFSET ?`, limit, offset)
 
-	case q != "" && tag == "":
-		like := "%" + q + "%"
-		rows, err = db.Query(`
-			SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
-			FROM bookmarks
-			WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?
-			ORDER BY id DESC
-			LIMIT ? OFFSET ?`,
-			like, like, like, limit, offset)
+		case q != "" && tag == "":
+			like := "%" + q + "%"
+			rows, err = db.Query(`
+				SELECT id, url, title, excerpt, author, public, has_content, image_url, created_at, modified_at
+				FROM bookmarks
+				WHERE title LIKE ? OR url LIKE ? OR excerpt LIKE ?
+				ORDER BY id DESC
+				LIMIT ? OFFSET ?`,
+				like, like, like, limit, offset)
 
-	case q == "" && tag != "":
-		rows, err = db.Query(`
-			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
-			FROM bookmarks b
-			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-			INNER JOIN tags t ON t.id = bt.tag_id
-			WHERE t.name = ?
-			ORDER BY b.id DESC
-			LIMIT ? OFFSET ?`,
-			tag, limit, offset)
+		case q == "" && tag != "":
+			rows, err = db.Query(`
+				SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+				FROM bookmarks b
+				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+				INNER JOIN tags t ON t.id = bt.tag_id
+				WHERE t.name = ?
+				ORDER BY b.id DESC
+				LIMIT ? OFFSET ?`,
+				tag, limit, offset)
 
-	default:
-		like := "%" + q + "%"
-		rows, err = db.Query(`
-			SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
-			FROM bookmarks b
-			INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
-			INNER JOIN tags t ON t.id = bt.tag_id
-			WHERE t.name = ?
-			  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
-			ORDER BY b.id DESC
-			LIMIT ? OFFSET ?`,
-			tag, like, like, like, limit, offset)
+		default:
+			like := "%" + q + "%"
+			rows, err = db.Query(`
+				SELECT b.id, b.url, b.title, b.excerpt, b.author, b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+				FROM bookmarks b
+				INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+				INNER JOIN tags t ON t.id = bt.tag_id
+				WHERE t.name = ?
+				  AND (b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)
+				ORDER BY b.id DESC
+				LIMIT ? OFFSET ?`,
+				tag, like, like, like, limit, offset)
+		}
 	}
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
@@ -1153,9 +1192,15 @@ func handleRemoveTagFromBookmark(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleGetTags：登録されているタグを一覧で返すAPIです。
+// handleGetTags：ブックマークに使われているタグを一覧で返すAPIです。
+// INNER JOIN で bookmark_tags に1件以上紐付くタグだけを返します。
+// タグを作成しても1件もブックマークに付けていない場合は表示されません。
 func handleGetTags(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, name FROM tags ORDER BY name ASC")
+	rows, err := db.Query(`
+		SELECT DISTINCT t.id, t.name
+		FROM tags t
+		INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
+		ORDER BY t.name ASC`)
 	if err != nil {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
@@ -1177,6 +1222,9 @@ func handleGetTags(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateTag：新しいタグを登録するAPIです。
+// 同名タグが既に存在する場合は新規作成せず、既存タグをそのまま返します。
+// これにより、未使用タグ（フィルター候補に出ない）と同名のタグを
+// 追加しようとしても競合エラーにならず、正しいIDが取得できます。
 func handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	var t Tag
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
@@ -1188,15 +1236,17 @@ func handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := db.Exec("INSERT INTO tags (name) VALUES (?)", t.Name)
-	if err != nil {
-		// UNIQUE制約違反の場合は409 Conflictを返します。
-		http.Error(w, "同じ名前のタグが既に存在します", http.StatusConflict)
+	// INSERT OR IGNORE：同名タグが既にあれば何もしない（エラーにしない）。
+	// その後 SELECT で必ず正しい ID を取得します。
+	// 新規作成でも既存タグの再利用でも、常に同じ処理で対応できます。
+	if _, err := db.Exec("INSERT OR IGNORE INTO tags (name) VALUES (?)", t.Name); err != nil {
+		http.Error(w, "タグ保存エラー", http.StatusInternalServerError)
 		return
 	}
-
-	id, _ := result.LastInsertId()
-	t.ID = int(id)
+	if err := db.QueryRow("SELECT id, name FROM tags WHERE name = ?", t.Name).Scan(&t.ID, &t.Name); err != nil {
+		http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

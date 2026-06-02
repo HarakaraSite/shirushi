@@ -236,10 +236,15 @@
       background: #d0e2ff;
     }
 
-    /* 選択中のチップは枠線を付けてアクティブ状態を示します */
+    /* 選択中のチップは背景を青くして「押すと解除」とわかるようにします */
     .tag-filter-chip.active {
-      border-color: #1a56db;
+      background: #1a56db;
+      color: #fff;
       font-weight: bold;
+    }
+
+    .tag-filter-chip.active:hover {
+      background: #0058c4;
     }
 
     /* ===== ブックマーク一覧（グリッドレイアウト） =====
@@ -766,12 +771,24 @@
         return;
       }
       area.style.display = 'flex';
-      area.innerHTML = allTags.map(t => `
+
+      // 「タグなし」チップを先頭に固定表示します。
+      // "__untagged__" はバックエンドと合わせた特殊値です。
+      const untaggedChip = `
+        <span
+          class="tag-filter-chip ${activeTag === '__untagged__' ? 'active' : ''}"
+          onclick="toggleTagFilter('__untagged__')"
+        >タグなし</span>
+      `;
+
+      const tagChips = allTags.map(t => `
         <span
           class="tag-filter-chip ${activeTag === t.name ? 'active' : ''}"
           onclick="toggleTagFilter('${escapeHtml(t.name)}')"
         >${escapeHtml(t.name)}</span>
       `).join('');
+
+      area.innerHTML = untaggedChip + tagChips;
     }
 
     // タグチップをクリックしたときの処理です。
