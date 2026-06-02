@@ -1,0 +1,624 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: sans-serif;
+  background: #f5f5f5;
+  color: #333;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+
+input, textarea {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+  width: 100%;
+}
+
+/* ログイン画面の入力欄だけ白に固定します。
+   Pico CSS は詳細度の高いセレクターを使うため !important で勝ちます。 */
+#login-screen input {
+  background: #fff !important;
+  color: #333 !important;
+  border: 1px solid #ccc !important;
+}
+
+/* ブラウザのオートフィル時は background が上書き不可のため、
+   box-shadow で白を「塗り重ねる」ハックを使います。
+   これは Chrome / Safari / Edge すべてで有効な定番手法です。 */
+#login-screen input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #fff inset !important;
+  -webkit-text-fill-color: #333 !important;
+}
+
+button {
+  padding: 8px 16px;
+  background: #333;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  /* Pico CSS が button に margin-bottom を付けるため明示的にリセットします */
+  margin-bottom: 0;
+}
+
+button:hover {
+  background: #555;
+}
+
+/* ===== ヘッダーボタン群のPico CSSリセット =====
+   Pico classless は <label> に display:block + margin-bottom、
+   <a> にも独自スタイルを付けるため、flex 内でずれが生じます。
+   .header-actions 以下で明示的にリセットします。 */
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-actions > a,
+.header-actions > label {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+
+/* ===== モーダル ===== */
+#modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0; /* top/right/bottom/left すべて 0 */
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+
+/* display:none を上書きして flex で表示するためのクラス */
+#modal-overlay.open {
+  display: flex;
+}
+
+#modal-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#modal-box h2 {
+  font-size: 1.1rem;
+}
+
+/* モーダル内のボタン行 */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Pico CSS がボタンを引き伸ばすのを防ぎます */
+.modal-actions button {
+  width: auto;
+  padding: 8px 20px;
+  font-size: 0.9rem;
+}
+
+.btn-cancel {
+  background: #888;
+}
+
+.btn-cancel:hover {
+  background: #666;
+}
+
+/* ===== タグ入力エリア ===== */
+.tag-input-area {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  cursor: text;
+  position: relative;
+}
+
+.tag-input-area input {
+  border: none;
+  outline: none;
+  padding: 2px 0;
+  font-size: 0.875rem;
+  width: 120px;
+  flex-grow: 1;
+  /* Pico CSS がダーク背景・大きなパディングを当てるのをリセットします */
+  background: transparent;
+  color: #333;
+  box-shadow: none;
+  margin: 0;
+}
+
+/* 選択済みタグのバッジ（フォーム内） */
+.tag-selected-badge {
+  background: #e8f0fe;
+  color: #1a56db;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border-radius: 99px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-selected-badge button {
+  background: none;
+  color: #1a56db;
+  border: none;
+  padding: 0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* ドロップダウン候補リスト */
+.tag-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-top: 2px;
+  z-index: 200;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.tag-dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.tag-dropdown-item:hover {
+  background: #f0f4ff;
+}
+
+/* ===== タグフィルターチップ ===== */
+#tag-filter-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.tag-filter-chip {
+  background: #e8f0fe;
+  color: #1a56db;
+  font-size: 0.8rem;
+  padding: 4px 12px;
+  border-radius: 99px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  user-select: none; /* ダブルクリック時のテキスト選択を防ぎます */
+}
+
+.tag-filter-chip:hover {
+  background: #d0e2ff;
+}
+
+/* 選択中のチップは背景を青くして「押すと解除」とわかるようにします */
+.tag-filter-chip.active {
+  background: #1a56db;
+  color: #fff;
+  font-weight: bold;
+}
+
+.tag-filter-chip.active:hover {
+  background: #0058c4;
+}
+
+/* ===== ブックマーク一覧（グリッドレイアウト） =====
+   auto-fill: コンテナ幅に合わせてカラム数を自動で決めます。
+   minmax(260px, 1fr): 最小幅260px、最大は等分した幅まで広げます。
+   → 幅が広いほど 2列・3列… と自動で増えるレスポンシブグリッドになります。 */
+#bookmark-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  /* align-items のデフォルトは stretch = 同じ行のカードが最大高さに揃います */
+}
+
+/* カード全体 */
+.bookmark-item {
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden; /* 上部のサムネイルをカードの角に合わせてクリップします */
+  display: flex;
+  flex-direction: column; /* サムネイル → 本文 と縦に積みます */
+  position: relative;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  transition: box-shadow 0.15s;
+}
+
+.bookmark-item:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,0.14);
+}
+
+/* サムネイル上部ラッパー：チェックボックスを絶対配置するための起点 */
+.bookmark-thumb-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* サムネイル画像（カード上部全幅） */
+.bookmark-thumb {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;    /* はみ出た部分をトリミングします */
+  background: #f0f4f8;  /* 画像読み込み中の背景色 */
+  display: block;       /* inline のままだと下に数px の隙間ができます */
+}
+
+/* チェックボックス：サムネイル左上にオーバーレイ配置 */
+.bookmark-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #1a56db;
+  z-index: 1;
+}
+
+/* カード本体（サムネイル下のテキスト部分） */
+.bookmark-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1; /* カードの残り高さをすべて使います */
+}
+
+/* タイトル（最大2行で省略） */
+.title-link {
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: #0070f3;
+  text-decoration: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.title-link:hover {
+  text-decoration: underline;
+}
+
+/* URLをタイトルの下に小さく表示 */
+.bookmark-url {
+  font-size: 0.72rem;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; /* 長いURLは「...」で省略 */
+}
+
+.author {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+/* 抜粋（最大3行で省略） */
+.excerpt {
+  font-size: 0.82rem;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* タグバッジ */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tag-badge {
+  background: #e8f0fe;
+  color: #1a56db;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+/* カードフッター（日付 + 編集・削除ボタン） */
+/* margin-top: auto でフッターを常にカード下端に押し下げます */
+.bookmark-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.date {
+  font-size: 0.72rem;
+  color: #bbb;
+}
+
+/* ===== バッチ操作バー ===== */
+#bulk-bar {
+  display: none; /* 選択中のみ表示 */
+  align-items: center;
+  gap: 12px;
+  background: #1a56db;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+#bulk-bar.visible {
+  display: flex;
+}
+
+#bulk-bar button {
+  background: #fff;
+  color: #e00;
+  font-size: 0.875rem;
+  padding: 4px 14px;
+}
+
+#bulk-bar button:hover {
+  background: #fdd;
+}
+
+/* タグ追加ボタンは赤ではなく青系にします */
+#bulk-tag-btn {
+  color: #1a56db !important;
+}
+
+/* タグ削除ボタンはオレンジ系にします */
+#bulk-tag-remove-btn {
+  color: #b45309 !important;
+}
+
+#bulk-bar .bulk-cancel {
+  color: #555;
+  margin-left: auto; /* 右端に寄せます */
+}
+
+/* タグ追加・削除 共通ドロップダウンスタイル */
+#bulk-tag-dropdown-wrapper {
+  position: relative;
+}
+
+#bulk-tag-dropdown,
+#bulk-tag-remove-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  min-width: 200px;
+  z-index: 300;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* ドロップダウン上部の入力欄（追加・削除共通） */
+.bulk-tag-search-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid #eee;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  outline: none;
+  color: #333;
+}
+
+/* 候補リスト部分だけスクロール */
+.bulk-tag-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* 追加・削除どちらのドロップダウンにも適用します。
+   #bulk-bar が color:#fff を持つため、継承を明示的に上書きします。 */
+#bulk-tag-dropdown,
+#bulk-tag-remove-dropdown {
+  color: #333;
+}
+
+#bulk-tag-dropdown .bulk-tag-item,
+#bulk-tag-remove-dropdown .bulk-tag-item {
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+#bulk-tag-dropdown .bulk-tag-item:hover,
+#bulk-tag-remove-dropdown .bulk-tag-item:hover {
+  background: #f0f4ff;
+}
+
+/* ===== タグ管理モーダル ===== */
+/* display:none をインラインではなくCSSで定義します。
+   インラインスタイルは詳細度が高く .open による上書きができないためです。 */
+#tag-manager-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+
+#tag-manager-overlay.open {
+  display: flex;
+}
+
+#tag-manager-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#tag-manager-box h2 {
+  font-size: 1.1rem;
+}
+
+#tag-manager-box > p {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.tag-manager-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 4px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.9rem;
+}
+
+.tag-manager-item:last-child {
+  border-bottom: none;
+}
+
+/* 未使用タグはグレーで表示して区別します */
+.tag-manager-item.unused {
+  color: #aaa;
+}
+
+.tag-manager-item .tag-delete-btn {
+  background: #e00;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tag-manager-item .tag-delete-btn:hover {
+  background: #c00;
+}
+
+/* ===== ページネーション ===== */
+#pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  margin-bottom: 24px;
+}
+
+.pagination {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* 前へ・次へ・ページ番号ボタンの共通スタイル */
+.pagination button {
+  min-width: 36px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.pagination button:hover:not(:disabled) {
+  background: #f0f4ff;
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+/* 無効ボタン（先頭/末尾ページ時の「前へ」「次へ」） */
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 現在ページのボタン */
+.pagination button.page-current {
+  background: #1a56db;
+  color: #fff;
+  border-color: #1a56db;
+  font-weight: bold;
+}
+
+/* 「…」区切り */
+.pagination-ellipsis {
+  padding: 6px 2px;
+  color: #aaa;
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+/* ===== カードの操作ボタン群（フッター右端に横並び） ===== */
+.bookmark-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.edit-btn {
+  background: #0070f3;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
+.edit-btn:hover {
+  background: #0058c4;
+}
+
+.delete-btn {
+  background: #e00;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
+.delete-btn:hover {
+  background: #c00;
+}
