@@ -592,10 +592,6 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
 	}
-	if err != nil {
-		http.Error(w, "データベースエラー", http.StatusInternalServerError)
-		return
-	}
 
 	// rowsが開いたまま別のクエリを実行するとSQLiteでエラーになることがあるため、
 	// まず全ブックマークをスライスに読み出してからrowsを閉じます。
