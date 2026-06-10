@@ -29,20 +29,37 @@ async function checkAuth() {
   if (res.status === 401) {
     showLoginScreen();
   } else {
-    showMainScreen();
+    // 認証確認に使ったレスポンスは一覧データそのものなので、
+    // showMainScreen に渡して再利用します（同じAPIを2回呼ぶ無駄を省く）。
+    showMainScreen(res);
   }
 }
 
 function showLoginScreen() {
+  // 検索語・タグフィルター・選択状態をリセットします。
+  // ログアウト（またはセッション切れ）後に別の人がログインしたとき、
+  // 前の利用状態が画面に残らないようにするためです。
+  // ※この関数はログアウトと apiFetch の401検知の両方から呼ばれます。
+  document.getElementById('search-input').value = '';
+  activeTag = null;
+  selectedIds.clear();
+  updateBulkBar();
+  // 開いたままのモーダルやドロップダウンも閉じます。
+  closeModal();
+  closeTagManager();
+  closeBulkTagDropdown();
+  closeBulkTagRemoveDropdown();
+
   document.getElementById('login-screen').style.display = 'block';
   document.getElementById('main-screen').style.display = 'none';
 }
 
-async function showMainScreen() {
+// preloadedRes：checkAuth が取得済みの一覧レスポンス（あれば再利用します）。
+async function showMainScreen(preloadedRes = null) {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-screen').style.display = 'block';
   await loadTags();
-  await loadBookmarks();
+  await loadBookmarks('', null, 1, preloadedRes);
   setupTagInput();
 }
 
@@ -68,6 +85,20 @@ async function logout() {
   showLoginScreen();
 }
 
+// apiFetch：fetch のラッパーで、セッション切れ（401）を一元処理します。
+// セッションの有効期限は24時間なので、使っている途中で切れることがあります。
+// 401のとき各処理が res.json() の失敗などで静かに壊れるのを防ぐため、
+// ここでログイン画面に戻し、呼び出し元には null を返します。
+// 呼び出し側は「if (!res) return;」と書くだけで中断できます。
+async function apiFetch(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    showLoginScreen();
+    return null;
+  }
+  return res;
+}
+
 // ===== 検索 =====
 
 // debounce: 入力が止まって300ms後に検索します。
@@ -83,7 +114,8 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 // ===== データ取得 =====
 
 async function loadTags() {
-  const res = await fetch('/api/tags');
+  const res = await apiFetch('/api/tags');
+  if (!res) return; // セッション切れ：ログイン画面に戻っているので中断します
   allTags = await res.json() ?? [];
   renderTagFilterChips();
 }
@@ -107,14 +139,23 @@ function renderTagFilterChips() {
     >タグなし</span>
   `;
 
+  // onclick にタグ名を文字列として埋め込むと、名前に ' や \ が含まれる場合に
+  // JS構文エラーになるため、ID を渡して toggleTagFilterById で名前を引きます。
+  // （bookmarkMap と同じ「ID経由で引く」方式です）
   const tagChips = allTags.map(t => `
     <span
       class="tag-filter-chip ${activeTag === t.name ? 'active' : ''}"
-      onclick="toggleTagFilter('${escapeHtml(t.name)}')"
+      onclick="toggleTagFilterById(${t.id})"
     >${escapeHtml(t.name)}</span>
   `).join('');
 
   area.innerHTML = untaggedChip + tagChips;
+}
+
+// IDからタグを引いてフィルターを切り替えます（onclick用の安全な入口）。
+function toggleTagFilterById(id) {
+  const t = allTags.find(t => t.id === id);
+  if (t) toggleTagFilter(t.name);
 }
 
 // タグチップをクリックしたときの処理です。
@@ -128,7 +169,8 @@ function toggleTagFilter(tagName) {
 
 // q（キーワード）・tag（タグ名）・page（ページ番号）を組み合わせてブックマークを取得します。
 // 検索やタグフィルターが変わった場合は page=1 にリセットして呼び出します。
-async function loadBookmarks(q = '', tag = null, page = 1) {
+// preloadedRes が渡された場合はAPIを呼ばず、そのレスポンスを使います（起動時の再利用）。
+async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) {
   const list = document.getElementById('bookmark-list');
   currentPage = page; // 現在ページを記録します
 
@@ -140,15 +182,26 @@ async function loadBookmarks(q = '', tag = null, page = 1) {
   const qs = params.toString();
   const url = qs ? `/api/bookmarks?${qs}` : '/api/bookmarks';
 
-  const res = await fetch(url);
+  const res = preloadedRes ?? await apiFetch(url);
+  if (!res) return; // セッション切れ
   // レスポンスは { bookmarks: [...], total: N } の形式です。
   const resp = await res.json();
   const bookmarks = resp.bookmarks ?? [];
   const total     = resp.total     ?? 0;
 
+  // 削除などで総ページ数が減り、存在しないページを開いてしまった場合は
+  // 最終ページに移動し直します（例: 3ページ目を表示中にタグ削除で2ページに減った）。
+  // これがないと、データはあるのに「ブックマークはまだありません」と表示されます。
+  if (bookmarks.length === 0 && total > 0 && page > 1) {
+    return loadBookmarks(q, tag, Math.ceil(total / PAGE_SIZE));
+  }
+
   if (bookmarks.length === 0) {
     list.innerHTML = '<p>ブックマークはまだありません。</p>';
     document.getElementById('pagination').innerHTML = '';
+    // 表示が0件になったら選択もすべて解除します。
+    selectedIds.clear();
+    updateBulkBar();
     return;
   }
 
@@ -156,6 +209,14 @@ async function loadBookmarks(q = '', tag = null, page = 1) {
   // これにより、編集ボタン押下時に ID だけで元データを取得できます。
   bookmarkMap.clear();
   bookmarks.forEach(b => bookmarkMap.set(b.id, b));
+
+  // 選択状態を「いま表示されている項目」だけに絞り込みます。
+  // 検索・フィルター・ページ移動で画面から消えた項目が選択されたまま残ると、
+  // 「見えていないものまで一括削除される」事故につながるためです。
+  for (const id of [...selectedIds]) {
+    if (!bookmarkMap.has(id)) selectedIds.delete(id);
+  }
+  updateBulkBar();
 
   // ページネーションUIを描画します。
   renderPagination(total, page);
@@ -173,7 +234,7 @@ async function loadBookmarks(q = '', tag = null, page = 1) {
           ${selectedIds.has(b.id) ? 'checked' : ''}
         >
         <!-- サムネイルをクリックしてもURLを開けるよう a タグで包みます -->
-        <a href="${escapeHtml(b.url)}" target="_blank" rel="noopener">
+        <a href="${escapeHtml(safeHref(b.url))}" target="_blank" rel="noopener">
           <img
             class="bookmark-thumb"
             src="${b.image_url ? escapeHtml(b.image_url) : THUMB_PLACEHOLDER}"
@@ -186,7 +247,7 @@ async function loadBookmarks(q = '', tag = null, page = 1) {
 
       <!-- ── カード本体（テキスト情報） ── -->
       <div class="bookmark-body">
-        <a class="title-link" href="${escapeHtml(b.url)}" target="_blank" rel="noopener">${escapeHtml(b.title || b.url)}</a>
+        <a class="title-link" href="${escapeHtml(safeHref(b.url))}" target="_blank" rel="noopener">${escapeHtml(b.title || b.url)}</a>
         <div class="bookmark-url">${escapeHtml(b.url)}</div>
         ${b.author  ? `<div class="author">${escapeHtml(b.author)}</div>` : ''}
         ${b.excerpt ? `<div class="excerpt">${escapeHtml(b.excerpt)}</div>` : ''}
@@ -225,6 +286,11 @@ function onTagManagerOverlayClick(e) {
   if (e.target === document.getElementById('tag-manager-overlay')) closeTagManager();
 }
 
+// タグ管理モーダルに表示中のタグ名を ID で引くためのマップです。
+// onclick にタグ名を文字列として埋め込むと ' や \ で壊れるため、ID経由で引きます。
+// （未使用タグは allTags に含まれないため、bookmarkMap と同様に専用のMapを持ちます）
+const tagManagerMap = new Map(); // Map<id: number, name: string>
+
 // 全タグ一覧を描画します。
 // ?all=1 で未使用タグも取得します。使用中タグとの区別は usedIds で判定します。
 async function renderTagManagerList() {
@@ -233,9 +299,10 @@ async function renderTagManagerList() {
 
   // 全タグ（未使用含む）と使用中タグを並行取得します。
   const [allRes, usedRes] = await Promise.all([
-    fetch('/api/tags?all=1'),
-    fetch('/api/tags'),
+    apiFetch('/api/tags?all=1'),
+    apiFetch('/api/tags'),
   ]);
+  if (!allRes || !usedRes) return; // セッション切れ
   const allTagsList  = await allRes.json()  ?? [];
   const usedTagsList = await usedRes.json() ?? [];
 
@@ -247,22 +314,29 @@ async function renderTagManagerList() {
     return;
   }
 
+  // 表示するタグを Map に記録します（deleteTag が ID から名前を引けるように）。
+  tagManagerMap.clear();
+  allTagsList.forEach(t => tagManagerMap.set(t.id, t.name));
+
   listEl.innerHTML = allTagsList.map(t => {
     const isUsed = usedIds.has(t.id);
     return `
       <div class="tag-manager-item ${isUsed ? '' : 'unused'}">
         <span>${escapeHtml(t.name)}${isUsed ? '' : ' <small>(未使用)</small>'}</span>
-        <button class="tag-delete-btn" onclick="deleteTag(${t.id}, '${escapeHtml(t.name)}')">削除</button>
+        <button class="tag-delete-btn" onclick="deleteTag(${t.id})">削除</button>
       </div>
     `;
   }).join('');
 }
 
 // タグを削除します。削除後は一覧を再描画します。
-async function deleteTag(id, name) {
+// タグ名は onclick の引数ではなく tagManagerMap から ID で引きます。
+async function deleteTag(id) {
+  const name = tagManagerMap.get(id) ?? '';
   if (!confirm(`タグ「${name}」を削除しますか？\n※このタグが付いたブックマークからも外れます。`)) return;
 
-  const res = await fetch(`/api/tags/${id}`, { method: 'DELETE' });
+  const res = await apiFetch(`/api/tags/${id}`, { method: 'DELETE' });
+  if (!res) return; // セッション切れ
   if (!res.ok) {
     alert('削除に失敗しました');
     return;
@@ -361,6 +435,14 @@ function renderPagination(total, page) {
   el.innerHTML = html;
 }
 
+// safeHref：リンクにして安全なURLだけをそのまま返します。
+// "javascript:alert(1)" のようなURLを href に入れるとクリックでスクリプトが
+// 実行されてしまうため、http / https 以外は無害な "#" に置き換えます。
+// （インポート機能で他人が作ったブックマークファイルを取り込む経路があるため）
+function safeHref(url) {
+  return /^https?:\/\//i.test(url) ? url : '#';
+}
+
 // XSS対策：ユーザーデータをHTMLに埋め込む前にエスケープします。
 // < > & " ' などの特殊文字をHTMLエンティティに変換することで、
 // 悪意あるスクリプトが実行されるのを防ぎます。
@@ -450,13 +532,13 @@ document.getElementById('input-url').addEventListener('blur', async () => {
   const skipText = isEditMode || titleInput.value.trim() !== '';
 
   titleInput.placeholder = '取得中...';
-  const res = await fetch('/api/fetch-metadata', {
+  const res = await apiFetch('/api/fetch-metadata', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
   titleInput.placeholder = 'タイトル';
-  if (!res.ok) return;
+  if (!res || !res.ok) return; // セッション切れ or 取得失敗
 
   const meta = await res.json();
 
@@ -491,19 +573,20 @@ document.getElementById('bookmark-form').addEventListener('submit', async (e) =>
   let res;
   if (editingId === null) {
     // 追加モード：POST /api/bookmarks
-    res = await fetch('/api/bookmarks', {
+    res = await apiFetch('/api/bookmarks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
   } else {
     // 編集モード：PUT /api/bookmarks/:id
-    res = await fetch(`/api/bookmarks/${editingId}`, {
+    res = await apiFetch(`/api/bookmarks/${editingId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
   }
+  if (!res) return; // セッション切れ
 
   if (res.ok) {
     closeModal();
@@ -552,11 +635,12 @@ function setupTagInput() {
       selectTag(existing.id, existing.name);
     } else {
       // POST /api/tags で新規タグを作成します。
-      const res = await fetch('/api/tags', {
+      const res = await apiFetch('/api/tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
+      if (!res) return; // セッション切れ
       if (!res.ok) {
         alert('タグの作成に失敗しました');
         return;
@@ -596,10 +680,17 @@ function renderTagDropdown(query) {
     return;
   }
 
+  // タグ名を onclick に直接埋め込まず、IDから引く方式にします（' や \ 対策）。
   dropdown.innerHTML = filtered.map(t =>
-    `<div class="tag-dropdown-item" onclick="selectTag(${t.id}, '${escapeHtml(t.name)}')">${escapeHtml(t.name)}</div>`
+    `<div class="tag-dropdown-item" onclick="selectTagById(${t.id})">${escapeHtml(t.name)}</div>`
   ).join('');
   dropdown.style.display = 'block';
+}
+
+// IDからタグを引いて選択します（onclick用の安全な入口）。
+function selectTagById(id) {
+  const t = allTags.find(t => t.id === id);
+  if (t) selectTag(t.id, t.name);
 }
 
 function selectTag(id, name) {
@@ -744,11 +835,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (existing) {
       await bulkAddTag(existing.id, null);
     } else {
-      const res = await fetch('/api/tags', {
+      const res = await apiFetch('/api/tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
+      if (!res) return; // セッション切れ
       if (!res.ok) { alert('タグの作成に失敗しました'); return; }
       const newTag = await res.json();
       allTags.push(newTag);
@@ -814,7 +906,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function bulkRemoveTag(tagId) {
   closeBulkTagRemoveDropdown();
 
-  const res = await fetch('/api/bookmarks/bulk/tags', {
+  const res = await apiFetch('/api/bookmarks/bulk/tags', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -822,6 +914,7 @@ async function bulkRemoveTag(tagId) {
       tag_ids: [tagId],
     }),
   });
+  if (!res) return; // セッション切れ
 
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
@@ -845,7 +938,7 @@ document.addEventListener('click', (e) => {
 async function bulkAddTag(tagId, _unused) {
   closeBulkTagDropdown();
 
-  const res = await fetch('/api/bookmarks/bulk/tags', {
+  const res = await apiFetch('/api/bookmarks/bulk/tags', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -853,6 +946,7 @@ async function bulkAddTag(tagId, _unused) {
       tag_ids: [tagId],
     }),
   });
+  if (!res) return; // セッション切れ
 
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
@@ -868,11 +962,12 @@ async function bulkDelete() {
   const count = selectedIds.size;
   if (!confirm(`選択中の ${count} 件を削除しますか？`)) return;
 
-  const res = await fetch('/api/bookmarks', {
+  const res = await apiFetch('/api/bookmarks', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids: [...selectedIds] }),
   });
+  if (!res) return; // セッション切れ
 
   if (res.ok) {
     selectedIds.clear();
@@ -891,11 +986,17 @@ async function importBookmarks(input) {
   if (!file) return;
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch('/api/import', { method: 'POST', body: formData });
+  const res = await apiFetch('/api/import', { method: 'POST', body: formData });
+  if (!res) return; // セッション切れ
   if (res.ok) {
     const result = await res.json();
     alert(`インポート完了: ${result.imported}件追加、${result.skipped}件スキップ`);
-    loadBookmarks();
+    // インポートで新しいタグが作られた場合に備えてタグ一覧も更新します。
+    // （これがないとフィルターチップに新タグが表示されません）
+    await loadTags();
+    // 検索・タグフィルターの状態は他の操作と同様に維持します。
+    const q = document.getElementById('search-input').value.trim();
+    await loadBookmarks(q, activeTag);
   } else {
     alert('インポートに失敗しました');
   }
@@ -904,7 +1005,8 @@ async function importBookmarks(input) {
 
 async function deleteBookmark(id) {
   if (!confirm('削除しますか？')) return;
-  const res = await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
+  const res = await apiFetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
+  if (!res) return; // セッション切れ
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
     loadBookmarks(q, activeTag);

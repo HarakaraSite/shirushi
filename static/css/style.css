@@ -116,28 +116,26 @@ button:hover {
   align-items: center;
 }
 
-.header-actions > a,
-.header-actions > label {
-  display: inline-flex;
-  align-items: center;
-  margin: 0;
-  padding: 0;
-  line-height: 1;
-  /* Pico CSS が <a> にリンクスタイル（青色・下線）を当てるのをリセットします */
-  text-decoration: none;
-  color: inherit;
-}
-
-/* 全ヘッダーボタン：ゴーストスタイルで統一 */
-.header-actions button {
+/* 全ヘッダーボタン：ゴーストスタイルで統一
+   .header-btn はボタン風に装飾した <a>（エクスポートリンク）にも同じ見た目を当てます */
+.header-actions button,
+.header-actions .header-btn {
   background: transparent !important;
   color: var(--s-text) !important;
   border: 1px solid var(--s-border-hover) !important;
+  border-radius: 4px;
   padding: 6px 14px;
   font-size: 0.875rem;
+  /* <a> 用のリセット：Pico CSS のリンクスタイル（色・下線）を打ち消します */
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  line-height: normal;
+  cursor: pointer;
 }
 
-.header-actions button:hover {
+.header-actions button:hover,
+.header-actions .header-btn:hover {
   background: var(--s-surface-hover) !important;
   border-color: var(--s-accent) !important;
   color: var(--s-accent) !important;

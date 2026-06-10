@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="ja">
+<!-- data-theme="dark"：Pico CSS をダークテーマに固定します。
+     これがないと OS のライト/ダーク設定によって Pico のライト用変数
+     （:root:not([data-theme=dark]) という高詳細度セレクタ）が
+     style.css の :root 上書きに勝ってしまい、ライトモードのOSで表示が崩れます。 -->
+<html lang="ja" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -32,13 +36,12 @@
       <div class="header-actions">
         <!-- 追加ボタン：クリックでモーダルを「追加モード」で開く -->
         <button type="button" onclick="openModal()">＋ 追加</button>
-        <a href="/api/export" download="shirushi-bookmarks.html">
-          <button type="button">エクスポート</button>
-        </a>
-        <label style="cursor:pointer;">
-          <button type="button" onclick="this.parentElement.querySelector('input').click()">インポート</button>
-          <input type="file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
-        </label>
+        <!-- エクスポート：<a>の中に<button>を入れるのはHTML仕様違反
+             （インタラクティブ要素の入れ子）のため、<a>自体をボタン風に装飾します -->
+        <a href="/api/export" download="shirushi-bookmarks.html" class="header-btn">エクスポート</a>
+        <!-- インポート：非表示のファイル入力をボタンから開く方式です -->
+        <button type="button" onclick="document.getElementById('import-file').click()">インポート</button>
+        <input type="file" id="import-file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
         <button type="button" onclick="openTagManager()">タグ管理</button>
         <button type="button" onclick="logout()">ログアウト</button>
       </div>
