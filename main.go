@@ -1,15 +1,19 @@
 package main
 
 import (
-	"crypto/rand" // 暗号学的に安全な乱数を生成するパッケージ
+	"crypto/rand"   // 暗号学的に安全な乱数を生成するパッケージ
+	"crypto/subtle" // タイミング攻撃を防ぐ一定時間比較のためのパッケージ
 	"database/sql"
 	"encoding/hex"  // バイト列を16進数文字列に変換するパッケージ
 	"encoding/json" // JSON形式を扱うためのパッケージ
 	"embed"         // 静的ファイルをバイナリに埋め込むためのパッケージ
+	"errors"        // エラーの種類を判定する errors.As のためのパッケージ
 	"fmt"
-	"io"     // io.Reader を扱うためのパッケージ
-	"io/fs"  // ファイルシステムを抽象的に扱うためのパッケージ
+	"context" // 処理のキャンセルやタイムアウトを伝えるためのパッケージ
+	"io"      // io.Reader を扱うためのパッケージ
+	"io/fs"   // ファイルシステムを抽象的に扱うためのパッケージ
 	"log"
+	"net"      // IPアドレスの判定や低レベルのネットワーク接続のためのパッケージ
 	"net/http" // Webサーバー機能を提供するパッケージ
 	"os"       // 環境変数を読み取るためのパッケージ
 	"regexp"   // 正規表現でHTMLのメタタグを抽出するためのパッケージ
@@ -21,7 +25,11 @@ import (
 	// modernc.org/sqlite は純粋なGo言語で実装されたSQLiteドライバです。
 	// CGO（C言語との連携）が不要なため、Alpine Linuxなどの軽量環境でも
 	// そのまま動くシングルバイナリが作れます。
-	_ "modernc.org/sqlite"
+	// エラー型（sqlite.Error）を使うため、ブランクインポート（_）ではなく
+	// 名前付きでインポートします。
+	sqlite "modernc.org/sqlite"
+	// SQLITE_CONSTRAINT_UNIQUE などのエラーコード定数が定義されているパッケージです。
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // //go:embed ディレクティブで static ディレクトリの中身をバイナリに埋め込みます。
@@ -66,18 +74,18 @@ var (
 func main() {
 	var err error
 	// 1. データベースファイル（shirushi.db）を開きます。
-	db, err = sql.Open("sqlite", "./shirushi.db")
+	//
+	// SQLite は外部キー制約がデフォルト無効のため、DSN（接続文字列）の
+	// _pragma=foreign_keys(1) で有効化します。
+	// db.Exec("PRAGMA ...") で実行する方法だと、database/sql が内部に持つ
+	// コネクションプールのうち「その時使われた1本」にしか適用されません。
+	// DSN で指定すれば、プールが新しいコネクションを開くたびに毎回適用されるため、
+	// どのリクエストでも bookmark_tags の ON DELETE CASCADE が確実に動作します。
+	db, err = sql.Open("sqlite", "./shirushi.db?_pragma=foreign_keys(1)")
 	if err != nil {
 		log.Fatal("データベース接続エラー:", err)
 	}
 	defer db.Close()
-
-	// SQLite は外部キー制約がデフォルト無効のため、明示的に有効化します。
-	// これにより bookmark_tags の ON DELETE CASCADE が正しく動作します。
-	// （タグ削除時に bookmark_tags の関連行が自動削除される）
-	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		log.Fatal("外部キー設定エラー:", err)
-	}
 
 	// 2. テーブルが存在しない場合は作成します。
 	createTable()
@@ -123,11 +131,34 @@ func main() {
 	}
 	http.Handle("/", http.FileServerFS(subFS))
 
+	// 期限切れセッションの掃除をバックグラウンドで開始します。
+	go cleanupExpiredSessions()
+
 	fmt.Println("サーバーを起動しました: http://localhost:8181")
 	fmt.Println("API一覧を確認する: http://localhost:8181/api/bookmarks")
 	// 5. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
 	if err := http.ListenAndServe(":8181", authMiddleware(http.DefaultServeMux)); err != nil {
 		log.Fatal("サーバー起動エラー:", err)
+	}
+}
+
+// cleanupExpiredSessions：期限切れセッションを定期的に掃除するバックグラウンド処理です。
+// 認証チェック時の削除だけでは「二度と使われないトークン」がマップに残り続けるため、
+// 1時間ごとに全エントリを確認して期限切れを削除します。
+// main から `go cleanupExpiredSessions()` と呼ぶことで、
+// サーバー本体とは別のゴルーチン（軽量スレッド）として並行に動き続けます。
+func cleanupExpiredSessions() {
+	// time.Tick は指定間隔ごとに値が届くチャネルを返します。
+	// for range で受け取ることで「1時間ごとに1回ループが回る」動きになります。
+	for range time.Tick(1 * time.Hour) {
+		now := time.Now()
+		sessionsMu.Lock()
+		for token, expiry := range sessions {
+			if now.After(expiry) {
+				delete(sessions, token)
+			}
+		}
+		sessionsMu.Unlock()
 	}
 }
 
@@ -155,9 +186,15 @@ func authMiddleware(next http.Handler) http.Handler {
 		// トークンが有効かどうかを確認します。
 		sessionsMu.Lock()
 		expiry, ok := sessions[cookie.Value]
+		expired := ok && time.Now().After(expiry)
+		if expired {
+			// 期限切れのトークンは見つけた時点でマップから削除します。
+			// 放置するとメモリに溜まり続けるためです。
+			delete(sessions, cookie.Value)
+		}
 		sessionsMu.Unlock()
 
-		if !ok || time.Now().After(expiry) {
+		if !ok || expired {
 			// トークンが存在しない、または期限切れの場合は401を返します。
 			http.Error(w, "セッションが無効です", http.StatusUnauthorized)
 			return
@@ -182,7 +219,13 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	// パスワードをコードに直接書かず環境変数にする理由は、
 	// ソースコードをgitで管理しても漏洩しないようにするためです。
 	correctPassword := os.Getenv("SHIRUSHI_PASSWORD")
-	if correctPassword == "" || body.Password != correctPassword {
+	// パスワードの比較には subtle.ConstantTimeCompare を使います。
+	// 通常の == や != は「先頭から比較して違いが見つかった時点で終了」するため、
+	// 応答時間のわずかな差から正解のパスワードを1文字ずつ推測される
+	// 「タイミング攻撃」の余地があります。この関数は内容に関わらず
+	// 常に同じ時間で比較するため、その手がかりを与えません（一致すると1を返します）。
+	if correctPassword == "" ||
+		subtle.ConstantTimeCompare([]byte(body.Password), []byte(correctPassword)) != 1 {
 		http.Error(w, "パスワードが違います", http.StatusUnauthorized)
 		return
 	}
@@ -722,6 +765,44 @@ func getTagsByBookmarkID(bookmarkID int) ([]Tag, error) {
 	return tags, nil
 }
 
+// getBookmarkByID：指定したIDのブックマークをタグ込みでDBから取得するヘルパー関数です。
+// 作成・更新APIのレスポンスに使います。INSERT/UPDATE のあとDBから読み直すことで、
+// created_at / modified_at に「DBに実際に保存された値」を正確に返せます。
+// （Go側で time.Now() をセットすると、DBの CURRENT_TIMESTAMP（UTC）と
+// 　タイムゾーンや秒数がズレた「嘘の値」を返してしまうため）
+func getBookmarkByID(id int) (*Bookmark, error) {
+	var b Bookmark
+	err := db.QueryRow(`
+		SELECT id, url, title, excerpt, author,
+		       public, has_content, image_url, created_at, modified_at
+		FROM bookmarks WHERE id = ?`, id).Scan(
+		&b.ID, &b.URL, &b.Title, &b.Excerpt, &b.Author,
+		&b.Public, &b.HasContent, &b.ImageURL, &b.CreatedAt, &b.ModifiedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	// タグも一緒に取得してセットします。
+	b.Tags, err = getTagsByBookmarkID(id)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// isUniqueConstraintError：エラーが UNIQUE 制約違反かどうかを判定するヘルパー関数です。
+// errors.As は、エラーが特定の型（ここでは *sqlite.Error）かどうかを調べ、
+// そうであれば中身を取り出してくれる標準の仕組みです。
+// SQLite はエラーの種類を数値コードで表し、UNIQUE 制約違反は
+// SQLITE_CONSTRAINT_UNIQUE（2067）という拡張コードになります。
+func isUniqueConstraintError(err error) bool {
+	var serr *sqlite.Error
+	if errors.As(err, &serr) {
+		return serr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+	}
+	return false
+}
+
 // handleCreateBookmark：新しいブックマークを登録するAPIです。
 // リクエストボディの tags フィールドにタグIDのリストを含めると紐付けも行います。
 // 例: {"url":"...","title":"...","tags":[{"id":1},{"id":2}]}
@@ -741,6 +822,13 @@ func handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	query := `INSERT INTO bookmarks (url, title, excerpt, author, image_url) VALUES (?, ?, ?, ?, ?);`
 	result, err := db.Exec(query, b.URL, b.Title, b.Excerpt, b.Author, b.ImageURL)
 	if err != nil {
+		// url カラムには UNIQUE 制約があるため、登録済みのURLを再登録しようとすると
+		// 制約違反エラーになります。これはサーバーの障害ではなく「リクエスト内容の競合」
+		// なので、409 Conflict と分かりやすいメッセージを返します。
+		if isUniqueConstraintError(err) {
+			http.Error(w, "このURLは既に登録されています", http.StatusConflict)
+			return
+		}
 		http.Error(w, "保存エラー", http.StatusInternalServerError)
 		return
 	}
@@ -753,21 +841,21 @@ func handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "タグ保存エラー", http.StatusInternalServerError)
 		return
 	}
-	// レスポンス用にDBからタグ名を取り直します（リクエストにはIDしかないため）。
-	b.Tags, err = getTagsByBookmarkID(b.ID)
+
+	// DBから読み直して「実際に保存された値」をレスポンスとして返します。
+	// created_at はDBの CURRENT_TIMESTAMP が入り、modified_at は未更新なので
+	// NULL（JSONでは null）になります。
+	created, err := getBookmarkByID(b.ID)
 	if err != nil {
-		http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
+		http.Error(w, "登録データ取得エラー", http.StatusInternalServerError)
 		return
 	}
 
-	now := time.Now()
-	b.CreatedAt = now
-	b.ModifiedAt = &now
 	// 成功（201 Created）を返し、登録されたデータをJSONで返信します。
 	// ※ WriteHeader より前に Header().Set() を呼ぶ必要があります。
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated) // 201 Created
-	json.NewEncoder(w).Encode(b)
+	json.NewEncoder(w).Encode(created)
 }
 
 // handleUpdateBookmark：既存のブックマークを更新するAPIです。
@@ -804,6 +892,12 @@ func handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 		WHERE id = ?;`
 	result, err := db.Exec(query, b.URL, b.Title, b.Excerpt, b.Author, b.ImageURL, id)
 	if err != nil {
+		// 更新でも、URLを「別のブックマークが既に使っているURL」に変更しようとすると
+		// UNIQUE 制約違反になるため、作成時と同じく 409 Conflict を返します。
+		if isUniqueConstraintError(err) {
+			http.Error(w, "このURLは既に別のブックマークで登録されています", http.StatusConflict)
+			return
+		}
 		http.Error(w, "更新エラー", http.StatusInternalServerError)
 		return
 	}
@@ -816,24 +910,30 @@ func handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// タグが指定されていれば既存の紐付けを置き換えます。
-	if err := syncBookmarkTags(id, b.Tags); err != nil {
-		http.Error(w, "タグ保存エラー", http.StatusInternalServerError)
-		return
+	// タグの更新は tags フィールドが送られてきた場合のみ行います。
+	// Goの encoding/json では、JSONにキーが存在しない場合スライスは nil のまま、
+	// "tags": [] と明示された場合は「空のスライス」になります。
+	// この違いを利用して「省略＝変更しない」「空配列＝全削除」を区別します。
+	// （CLIなど将来のクライアントがタイトルだけ更新したいとき、
+	// 　tags を送り忘れてタグが全消えする事故を防ぎます）
+	if b.Tags != nil {
+		if err := syncBookmarkTags(id, b.Tags); err != nil {
+			http.Error(w, "タグ保存エラー", http.StatusInternalServerError)
+			return
+		}
 	}
-	// レスポンス用にDBからタグ名を取り直します。
-	b.Tags, err = getTagsByBookmarkID(id)
+
+	// DBから読み直して「実際に保存された値」をレスポンスとして返します。
+	// これにより created_at（リクエストには含まれないためゼロ値だった）と
+	// modified_at（DBの CURRENT_TIMESTAMP）の両方が正確な値になります。
+	updated, err := getBookmarkByID(id)
 	if err != nil {
-		http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
+		http.Error(w, "更新データ取得エラー", http.StatusInternalServerError)
 		return
 	}
 
-	// 更新後のデータをJSONで返します。
-	b.ID = id
-	now := time.Now()
-	b.ModifiedAt = &now
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(b)
+	json.NewEncoder(w).Encode(updated)
 }
 
 // handleDeleteBookmark：指定されたIDのブックマークを削除するAPIです。
@@ -1028,11 +1128,58 @@ func handleFetchMetadata(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(meta)
 }
 
+// isPrivateIP：プライベート・内部ネットワーク向けのIPアドレスかどうかを判定します。
+// SSRF（Server-Side Request Forgery）対策に使います。
+// SSRFとは「サーバーに内部ネットワークへのアクセスを代行させる攻撃」のことで、
+// 例えば http://192.168.1.1/ を渡してルーターの管理画面を取得させる、といった悪用です。
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || // 127.0.0.1 など自分自身
+		ip.IsPrivate() || // 10.x / 172.16-31.x / 192.168.x のLAN内アドレス
+		ip.IsLinkLocalUnicast() || // 169.254.x（クラウドのメタデータAPIで悪用されがち）
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() // 0.0.0.0
+}
+
+// safeDialContext：接続先のIPを検査してから接続する、安全なダイヤル関数です。
+// URLの文字列ではなく「実際に接続する瞬間のIP」を検査するのがポイントで、
+// これによりリダイレクトやDNSの再解決を使ったすり抜けも防げます。
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// addr は "example.com:443" のような形式なので、ホスト名とポートに分けます。
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// ホスト名をIPアドレスに解決します（既にIPならそのまま返ります）。
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return nil, errors.New("内部ネットワークへのアクセスは禁止されています: " + ip.String())
+		}
+	}
+
+	// 検査をパスした解決済みIPに対して直接接続します。
+	// ホスト名のまま接続すると、接続時にDNSが再解決されて
+	// 別の（内部の）IPに繋がる恐れがあるためです。
+	var d net.Dialer
+	return d.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+}
+
 // fetchMetadata：URLにHTTPアクセスしてHTMLからメタデータを抽出する関数です。
 func fetchMetadata(url string) (*Metadata, error) {
 	// 10秒でタイムアウトするHTTPクライアントを作ります。
 	// デフォルトのクライアントはタイムアウトがないため、自前で設定するのが定石です。
 	client := &http.Client{Timeout: 10 * time.Second}
+
+	// SSRF対策：接続先のIPを検査するダイヤル関数を組み込みます。
+	// 自宅LAN内のサーバーのメタデータを取得したい場合は、
+	// 環境変数 SHIRUSHI_ALLOW_PRIVATE_FETCH=1 を設定すると検査を無効化できます。
+	if os.Getenv("SHIRUSHI_ALLOW_PRIVATE_FETCH") != "1" {
+		client.Transport = &http.Transport{DialContext: safeDialContext}
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

@@ -512,7 +512,10 @@ document.getElementById('bookmark-form').addEventListener('submit', async (e) =>
     await loadBookmarks(q, activeTag);
     await loadTags(); // 新規タグが追加された場合にフィルターチップを更新します
   } else {
-    alert(editingId === null ? '登録に失敗しました' : '更新に失敗しました');
+    // サーバーが返すエラーメッセージ（例:「このURLは既に登録されています」）を
+    // そのまま表示します。本文が空の場合は従来の汎用メッセージを使います。
+    const message = (await res.text()).trim();
+    alert(message || (editingId === null ? '登録に失敗しました' : '更新に失敗しました'));
   }
 });
 

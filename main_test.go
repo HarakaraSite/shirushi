@@ -21,7 +21,9 @@ func setupTestDB(t *testing.T) {
 	t.Helper()
 
 	var err error
-	db, err = sql.Open("sqlite", ":memory:")
+	// 本番（main.go）と同じく DSN で外部キー制約を有効化し、
+	// ON DELETE CASCADE の挙動もテストで再現できるようにします。
+	db, err = sql.Open("sqlite", ":memory:?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatalf("テスト用DB作成エラー: %v", err)
 	}
