@@ -8,9 +8,10 @@ import (
 	"encoding/json" // JSON形式を扱うためのパッケージ
 	"embed"         // 静的ファイルをバイナリに埋め込むためのパッケージ
 	"errors"        // エラーの種類を判定する errors.As のためのパッケージ
-	"fmt"
 	"context" // 処理のキャンセルやタイムアウトを伝えるためのパッケージ
-	"io"      // io.Reader を扱うためのパッケージ
+	"fmt"
+	"html" // HTML特殊文字（< > & " '）をエスケープするためのパッケージ
+	"io"   // io.Reader を扱うためのパッケージ
 	"io/fs"   // ファイルシステムを抽象的に扱うためのパッケージ
 	"log"
 	"net"      // IPアドレスの判定や低レベルのネットワーク接続のためのパッケージ
@@ -1349,7 +1350,10 @@ func handleGetTags(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var tags []Tag
+	// var tags []Tag だと0件のとき nil のままJSONが "null" になるため、
+	// 空スライスで初期化して必ず "[]" が返るようにします。
+	// （フロント側で tags.forEach などがエラーになるのを防ぐ）
+	tags := []Tag{}
 	for rows.Next() {
 		var t Tag
 		if err := rows.Scan(&t.ID, &t.Name); err != nil {
@@ -1521,12 +1525,16 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 		// ADD_DATE は Unix タイムスタンプ（秒）です。
 		addDate := item.CreatedAt.Unix()
 
+		// タイトルやURLに < > & " などのHTML特殊文字が含まれていると
+		// 生成されるHTMLの構造が壊れてしまうため（例: タイトルが A<B>C のページ）、
+		// html.EscapeString で安全な表記（&lt; など）に変換してから埋め込みます。
 		fmt.Fprintf(w, `    <DT><A HREF="%s" ADD_DATE="%d" TAGS="%s">%s</A>`+"\n",
-			item.URL, addDate, tags, item.Title)
+			html.EscapeString(item.URL), addDate,
+			html.EscapeString(tags), html.EscapeString(item.Title))
 
 		// excerptがある場合は <DD> タグで説明文を追加します。
 		if item.Excerpt != "" {
-			fmt.Fprintf(w, `    <DD>%s`+"\n", item.Excerpt)
+			fmt.Fprintf(w, `    <DD>%s`+"\n", html.EscapeString(item.Excerpt))
 		}
 	}
 
@@ -1555,7 +1563,9 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ファイルの読み込みに失敗しました", http.StatusInternalServerError)
 		return
 	}
-	html := string(content)
+	// 変数名を doc にしているのは、エスケープ処理で使う標準パッケージ html と
+	// 名前が衝突（シャドーイング）しないようにするためです。
+	doc := string(content)
 
 	// <DT><A ...> のパターンでブックマークを抽出します。
 	// (?s) は . が改行にもマッチするオプションです。
@@ -1566,21 +1576,23 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	// <DD> タグで説明文を取得します。
 	reDD := regexp.MustCompile(`(?i)<DD>([^\n<]+)`)
 
-	matches := reBookmark.FindAllStringSubmatchIndex(html, -1)
+	matches := reBookmark.FindAllStringSubmatchIndex(doc, -1)
 
 	imported := 0
 	skipped  := 0
 
 	for _, matchIdx := range matches {
 		// matchIdx[2],matchIdx[3] が属性部分、matchIdx[4],matchIdx[5] がタイトルです。
-		attrs := html[matchIdx[2]:matchIdx[3]]
-		title := strings.TrimSpace(html[matchIdx[4]:matchIdx[5]])
+		attrs := doc[matchIdx[2]:matchIdx[3]]
+		// エクスポート時に &lt; などへエスケープされた特殊文字を元に戻します。
+		// （ブラウザがエクスポートしたファイルも同様にエスケープされています）
+		title := html.UnescapeString(strings.TrimSpace(doc[matchIdx[4]:matchIdx[5]]))
 
 		hrefMatch := reHref.FindStringSubmatch(attrs)
 		if len(hrefMatch) < 2 {
 			continue
 		}
-		url := hrefMatch[1]
+		url := html.UnescapeString(hrefMatch[1])
 
 		// ADD_DATE（Unixタイムスタンプ）を time.Time に変換します。
 		var createdAt time.Time
@@ -1593,10 +1605,10 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 			createdAt = time.Now()
 		}
 
-		// タグ名をカンマで分割します。
+		// タグ名をカンマで分割します（エスケープも元に戻します）。
 		var tagNames []string
 		if m := reTags.FindStringSubmatch(attrs); len(m) > 1 && m[1] != "" {
-			for _, t := range strings.Split(m[1], ",") {
+			for _, t := range strings.Split(html.UnescapeString(m[1]), ",") {
 				if name := strings.TrimSpace(t); name != "" {
 					tagNames = append(tagNames, name)
 				}
@@ -1605,9 +1617,9 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 
 		// <DD> タグの説明文を取得します（<A>タグの直後を探します）。
 		excerpt := ""
-		afterA := html[matchIdx[1]:]
+		afterA := doc[matchIdx[1]:]
 		if m := reDD.FindStringSubmatch(afterA); len(m) > 1 {
-			excerpt = strings.TrimSpace(m[1])
+			excerpt = html.UnescapeString(strings.TrimSpace(m[1]))
 		}
 
 		// URLが重複している場合はスキップします（INSERT OR IGNORE）。
