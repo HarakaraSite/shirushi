@@ -1,21 +1,22 @@
 package main
 
 import (
+	"context"       // 処理のキャンセルやタイムアウトを伝えるためのパッケージ
 	"crypto/rand"   // 暗号学的に安全な乱数を生成するパッケージ
 	"crypto/subtle" // タイミング攻撃を防ぐ一定時間比較のためのパッケージ
 	"database/sql"
+	"embed"         // 静的ファイルをバイナリに埋め込むためのパッケージ
 	"encoding/hex"  // バイト列を16進数文字列に変換するパッケージ
 	"encoding/json" // JSON形式を扱うためのパッケージ
-	"embed"         // 静的ファイルをバイナリに埋め込むためのパッケージ
 	"errors"        // エラーの種類を判定する errors.As のためのパッケージ
-	"context" // 処理のキャンセルやタイムアウトを伝えるためのパッケージ
 	"fmt"
-	"html" // HTML特殊文字（< > & " '）をエスケープするためのパッケージ
-	"io"   // io.Reader を扱うためのパッケージ
-	"io/fs"   // ファイルシステムを抽象的に扱うためのパッケージ
+	"html"  // HTML特殊文字（< > & " '）をエスケープするためのパッケージ
+	"io"    // io.Reader を扱うためのパッケージ
+	"io/fs" // ファイルシステムを抽象的に扱うためのパッケージ
 	"log"
 	"net"      // IPアドレスの判定や低レベルのネットワーク接続のためのパッケージ
 	"net/http" // Webサーバー機能を提供するパッケージ
+	"net/url"  // URL文字列を構文解析するためのパッケージ
 	"os"       // 環境変数を読み取るためのパッケージ
 	"regexp"   // 正規表現でHTMLのメタタグを抽出するためのパッケージ
 	"strconv"  // 文字列と数値を相互変換するためのパッケージ
@@ -43,14 +44,14 @@ var staticFiles embed.FS
 // Shioriのスキーマに合わせたフィールド構成になっています。
 // `json:"..."` という記述（タグ）は、JSON形式にする際の名前を指定しています。
 type Bookmark struct {
-	ID         int       `json:"id"`
-	URL        string    `json:"url"`
-	Title      string    `json:"title"`
-	Excerpt    string    `json:"excerpt"`    // 本文の抜粋・メモ欄
-	Author     string    `json:"author"`     // ページの著者
-	Public     int       `json:"public"`     // 公開フラグ（0:非公開 1:公開）
-	HasContent bool      `json:"has_content"` // 本文キャッシュの有無
-	ImageURL   string    `json:"image_url"`  // サムネイル画像URL
+	ID         int        `json:"id"`
+	URL        string     `json:"url"`
+	Title      string     `json:"title"`
+	Excerpt    string     `json:"excerpt"`     // 本文の抜粋・メモ欄
+	Author     string     `json:"author"`      // ページの著者
+	Public     int        `json:"public"`      // 公開フラグ（0:非公開 1:公開）
+	HasContent bool       `json:"has_content"` // 本文キャッシュの有無
+	ImageURL   string     `json:"image_url"`   // サムネイル画像URL
 	CreatedAt  time.Time  `json:"created_at"`
 	ModifiedAt *time.Time `json:"modified_at"` // 最終更新日時（未更新の場合はnull）
 	Tags       []Tag      `json:"tags"`        // 紐付いているタグの一覧
@@ -70,6 +71,22 @@ var db *sql.DB
 var (
 	sessions   = map[string]time.Time{} // token -> 有効期限
 	sessionsMu sync.Mutex
+)
+
+const (
+	// maxJSONBodyBytes：JSON API のリクエスト本文の最大サイズです。
+	// 小さな個人用アプリでも、巨大な本文を無制限に読む必要はないため上限を設けます。
+	maxJSONBodyBytes int64 = 1 << 20 // 1MB
+
+	// maxBulkIDs：一括操作で受け付けるID配列の最大件数です。
+	// SQLのプレースホルダー数やメモリ使用量が無制限に増えるのを防ぎます。
+	maxBulkIDs = 1000
+
+	// maxBulkTagPairs：一括タグ追加で実行する bookmark_id × tag_id の最大組み合わせ数です。
+	maxBulkTagPairs = 5000
+
+	// maxImportBytes：インポートHTMLの最大サイズです。
+	maxImportBytes int64 = 10 << 20 // 10MB
 )
 
 func main() {
@@ -138,7 +155,15 @@ func main() {
 	fmt.Println("サーバーを起動しました: http://localhost:8181")
 	fmt.Println("API一覧を確認する: http://localhost:8181/api/bookmarks")
 	// 5. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
-	if err := http.ListenAndServe(":8181", authMiddleware(http.DefaultServeMux)); err != nil {
+	server := &http.Server{
+		Addr:              ":8181",
+		Handler:           authMiddleware(http.DefaultServeMux),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal("サーバー起動エラー:", err)
 	}
 }
@@ -211,7 +236,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSONBody(w, r, &body); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
@@ -273,10 +298,12 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 	// Cookieを即座に無効化します（MaxAge=-1 で削除）。
 	http.SetCookie(w, &http.Cookie{
-		Name:   "session",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -417,31 +444,38 @@ func hasUniqueURLIndex() bool {
 	if err != nil {
 		return false
 	}
-	defer rows.Close()
 
+	// rows を開いたまま別のクエリを実行すると、接続数が少ない環境で
+	// 次のクエリが同じ接続を待ち続けることがあります。
+	// そのため、まず UNIQUE インデックス名だけを読み出して rows を閉じます。
+	var uniqueIndexNames []string
 	for rows.Next() {
 		var seq, unique int
 		var name, origin string
 		var partial int
 		rows.Scan(&seq, &name, &unique, &origin, &partial)
-		// unique=1 かつ url カラムのインデックスを探します。
 		if unique == 1 {
-			// そのインデックスが url カラムに対応するか確認します。
-			infoRows, err := db.Query("PRAGMA index_info(" + name + ")")
-			if err != nil {
-				continue
-			}
-			for infoRows.Next() {
-				var rank, cid int
-				var colName string
-				infoRows.Scan(&rank, &cid, &colName)
-				if colName == "url" {
-					infoRows.Close()
-					return true
-				}
-			}
-			infoRows.Close()
+			uniqueIndexNames = append(uniqueIndexNames, name)
 		}
+	}
+	rows.Close()
+
+	for _, name := range uniqueIndexNames {
+		// そのインデックスが url カラムに対応するか確認します。
+		infoRows, err := db.Query("PRAGMA index_info(" + name + ")")
+		if err != nil {
+			continue
+		}
+		for infoRows.Next() {
+			var rank, cid int
+			var colName string
+			infoRows.Scan(&rank, &cid, &colName)
+			if colName == "url" {
+				infoRows.Close()
+				return true
+			}
+		}
+		infoRows.Close()
 	}
 	return false
 }
@@ -457,6 +491,14 @@ func migrateAddUniqueURL() {
 	}
 
 	queries := []string{
+		// 0. 既存のタグ紐付けを一時退避します。
+		// このあと旧 bookmarks テーブルを DROP すると、外部キーの ON DELETE CASCADE により
+		// bookmark_tags の行が削除される可能性があるためです。
+		`CREATE TEMP TABLE bookmark_tags_backup AS
+         SELECT bt.bookmark_id, bt.tag_id
+         FROM bookmark_tags bt
+         INNER JOIN bookmarks b ON b.id = bt.bookmark_id
+         INNER JOIN tags t ON t.id = bt.tag_id`,
 		// 1. UNIQUE 制約付きの新テーブルを作成します。
 		`CREATE TABLE bookmarks_new (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -480,6 +522,15 @@ func migrateAddUniqueURL() {
 		`DROP TABLE bookmarks`,
 		// 4. 新テーブルを正式な名前にリネームします。
 		`ALTER TABLE bookmarks_new RENAME TO bookmarks`,
+		// 5. 退避していたタグ紐付けを復元します。
+		// URL重複でコピーされなかったブックマークIDは復元対象から外します。
+		`INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id)
+         SELECT backup.bookmark_id, backup.tag_id
+         FROM bookmark_tags_backup backup
+         INNER JOIN bookmarks b ON b.id = backup.bookmark_id
+         INNER JOIN tags t ON t.id = backup.tag_id`,
+		// 6. 一時テーブルを削除します。
+		`DROP TABLE bookmark_tags_backup`,
 	}
 
 	for _, q := range queries {
@@ -522,10 +573,10 @@ func addOneMonth(yyyyMM string) string {
 //	?page=N            ページ番号（デフォルト1、1始まり）
 //	?limit=N           1ページあたりの件数（デフォルト50）
 func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
-	q        := strings.TrimSpace(r.URL.Query().Get("q"))
-	tag      := strings.TrimSpace(r.URL.Query().Get("tag"))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	dateFrom := strings.TrimSpace(r.URL.Query().Get("date_from"))
-	dateTo   := strings.TrimSpace(r.URL.Query().Get("date_to"))
+	dateTo := strings.TrimSpace(r.URL.Query().Get("date_to"))
 
 	limit := 50
 	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 200 {
@@ -791,6 +842,14 @@ func getBookmarkByID(id int) (*Bookmark, error) {
 	return &b, nil
 }
 
+// recordExists：指定テーブルにIDの行が存在するか確認します。
+// table はプログラム内の固定文字列だけを渡す前提で使います。
+func recordExists(table string, id int) (bool, error) {
+	var exists bool
+	err := db.QueryRow(fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE id = ?)", table), id).Scan(&exists)
+	return exists, err
+}
+
 // isUniqueConstraintError：エラーが UNIQUE 制約違反かどうかを判定するヘルパー関数です。
 // errors.As は、エラーが特定の型（ここでは *sqlite.Error）かどうかを調べ、
 // そうであれば中身を取り出してくれる標準の仕組みです。
@@ -804,21 +863,63 @@ func isUniqueConstraintError(err error) bool {
 	return false
 }
 
+// validateHTTPURL：保存・取得対象として扱ってよいURLか確認します。
+// ブラウザ側でも javascript: などを無害化していますが、CLIや別クライアントが
+// APIを直接使う可能性もあるため、サーバー側でも同じ入口で防ぎます。
+func validateHTTPURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("URLは必須です")
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", errors.New("URLは http または https で始まる必要があります")
+	}
+	if u.Host == "" {
+		return "", errors.New("URLにはホスト名が必要です")
+	}
+	return trimmed, nil
+}
+
+// decodeJSONBody：JSONリクエスト本文をサイズ制限付きで読み取ります。
+// json.NewDecoder に r.Body を直接渡すと、巨大な本文を送られたときに
+// 必要以上にメモリや処理時間を使うため、http.MaxBytesReader で上限をかけます。
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	return json.NewDecoder(r.Body).Decode(dst)
+}
+
+// validateBulkIDs：一括操作のID配列が空でなく、上限以内か確認します。
+func validateBulkIDs(ids []int, name string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("%s が必要です", name)
+	}
+	if len(ids) > maxBulkIDs {
+		return fmt.Errorf("%s は一度に%d件までです", name, maxBulkIDs)
+	}
+	return nil
+}
+
 // handleCreateBookmark：新しいブックマークを登録するAPIです。
 // リクエストボディの tags フィールドにタグIDのリストを含めると紐付けも行います。
 // 例: {"url":"...","title":"...","tags":[{"id":1},{"id":2}]}
 func handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	var b Bookmark
 	// ブラウザから送られてきたJSONを読み取り、構造体に変換します。
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+	if err := decodeJSONBody(w, r, &b); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
-	// URLが空の場合はエラーにします。
-	if b.URL == "" {
-		http.Error(w, "URLは必須です", http.StatusBadRequest)
+	validatedURL, err := validateHTTPURL(b.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	b.URL = validatedURL
 	// データベースに保存します。
 	query := `INSERT INTO bookmarks (url, title, excerpt, author, image_url) VALUES (?, ?, ?, ?, ?);`
 	result, err := db.Exec(query, b.URL, b.Title, b.Excerpt, b.Author, b.ImageURL)
@@ -875,14 +976,16 @@ func handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// リクエストボディのJSONを読み取り、構造体に変換します。
 	var b Bookmark
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+	if err := decodeJSONBody(w, r, &b); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
-	if b.URL == "" {
-		http.Error(w, "URLは必須です", http.StatusBadRequest)
+	validatedURL, err := validateHTTPURL(b.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	b.URL = validatedURL
 
 	// UPDATE文で該当IDのレコードを更新します。
 	// modified_at は更新のたびに現在時刻をセットします。
@@ -975,9 +1078,20 @@ func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
 		BookmarkIDs []int `json:"bookmark_ids"`
 		TagIDs      []int `json:"tag_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
-		len(req.BookmarkIDs) == 0 || len(req.TagIDs) == 0 {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
+		return
+	}
+	if err := validateBulkIDs(req.BookmarkIDs, "bookmark_ids"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateBulkIDs(req.TagIDs, "tag_ids"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req.BookmarkIDs)*len(req.TagIDs) > maxBulkTagPairs {
+		http.Error(w, fmt.Sprintf("タグ一括追加は一度に%d組み合わせまでです", maxBulkTagPairs), http.StatusBadRequest)
 		return
 	}
 
@@ -1023,9 +1137,16 @@ func handleBulkRemoveTags(w http.ResponseWriter, r *http.Request) {
 		BookmarkIDs []int `json:"bookmark_ids"`
 		TagIDs      []int `json:"tag_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
-		len(req.BookmarkIDs) == 0 || len(req.TagIDs) == 0 {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
+		return
+	}
+	if err := validateBulkIDs(req.BookmarkIDs, "bookmark_ids"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateBulkIDs(req.TagIDs, "tag_ids"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1067,8 +1188,12 @@ func handleBulkDeleteBookmarks(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		IDs []int `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "IDリストが不正です", http.StatusBadRequest)
+		return
+	}
+	if err := validateBulkIDs(req.IDs, "ids"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1114,12 +1239,17 @@ func handleFetchMetadata(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL string `json:"url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
+	if err := decodeJSONBody(w, r, &body); err != nil || body.URL == "" {
 		http.Error(w, "URLは必須です", http.StatusBadRequest)
 		return
 	}
+	validatedURL, err := validateHTTPURL(body.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	meta, err := fetchMetadata(body.URL)
+	meta, err := fetchMetadata(validatedURL)
 	if err != nil {
 		http.Error(w, "メタデータの取得に失敗しました", http.StatusBadGateway)
 		return
@@ -1173,7 +1303,18 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 func fetchMetadata(url string) (*Metadata, error) {
 	// 10秒でタイムアウトするHTTPクライアントを作ります。
 	// デフォルトのクライアントはタイムアウトがないため、自前で設定するのが定石です。
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("リダイレクト回数が多すぎます")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return errors.New("http/https 以外へのリダイレクトは禁止されています")
+			}
+			return nil
+		},
+	}
 
 	// SSRF対策：接続先のIPを検査するダイヤル関数を組み込みます。
 	// 自宅LAN内のサーバーのメタデータを取得したい場合は、
@@ -1194,6 +1335,15 @@ func fetchMetadata(url string) (*Metadata, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTPステータスがエラーです: %d", resp.StatusCode)
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if contentType != "" &&
+		!strings.Contains(contentType, "text/html") &&
+		!strings.Contains(contentType, "application/xhtml+xml") {
+		return nil, errors.New("HTMLではないレスポンスです")
+	}
 
 	// HTMLが大きいサイトでも安全に処理できるよう、最大1MBだけ読み込みます。
 	// メタタグは通常 <head> 内にあるので先頭部分で十分です。
@@ -1205,9 +1355,9 @@ func fetchMetadata(url string) (*Metadata, error) {
 
 	meta := &Metadata{}
 	// OGタグを優先し、なければ通常のメタタグ・titleタグを使います。
-	meta.Title    = firstNonEmpty(extractOGTag(html, "og:title"),    extractTitle(html))
-	meta.Excerpt  = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
-	meta.Author   = firstNonEmpty(extractOGTag(html, "og:author"),   extractMetaTag(html, "author"))
+	meta.Title = firstNonEmpty(extractOGTag(html, "og:title"), extractTitle(html))
+	meta.Excerpt = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
+	meta.Author = firstNonEmpty(extractOGTag(html, "og:author"), extractMetaTag(html, "author"))
 	meta.ImageURL = extractOGTag(html, "og:image")
 
 	return meta, nil
@@ -1278,8 +1428,26 @@ func handleAddTagToBookmark(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TagID int `json:"tag_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TagID == 0 {
+	if err := decodeJSONBody(w, r, &body); err != nil || body.TagID == 0 {
 		http.Error(w, "tag_idは必須です", http.StatusBadRequest)
+		return
+	}
+	bookmarkExists, err := recordExists("bookmarks", bookmarkID)
+	if err != nil {
+		http.Error(w, "ブックマーク確認エラー", http.StatusInternalServerError)
+		return
+	}
+	if !bookmarkExists {
+		http.Error(w, "指定されたブックマークが見つかりません", http.StatusNotFound)
+		return
+	}
+	tagExists, err := recordExists("tags", body.TagID)
+	if err != nil {
+		http.Error(w, "タグ確認エラー", http.StatusInternalServerError)
+		return
+	}
+	if !tagExists {
+		http.Error(w, "指定されたタグが見つかりません", http.StatusNotFound)
 		return
 	}
 
@@ -1309,7 +1477,7 @@ func handleRemoveTagFromBookmark(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TagID int `json:"tag_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TagID == 0 {
+	if err := decodeJSONBody(w, r, &body); err != nil || body.TagID == 0 {
 		http.Error(w, "tag_idは必須です", http.StatusBadRequest)
 		return
 	}
@@ -1373,7 +1541,7 @@ func handleGetTags(w http.ResponseWriter, r *http.Request) {
 // 追加しようとしても競合エラーにならず、正しいIDが取得できます。
 func handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	var t Tag
-	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+	if err := decodeJSONBody(w, r, &t); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
@@ -1408,7 +1576,7 @@ func handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var t Tag
-	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+	if err := decodeJSONBody(w, r, &t); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
@@ -1544,8 +1712,11 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 // handleImport：Netscape Bookmark形式のHTMLファイルを読み込んでDBに登録するAPIです。
 func handleImport(w http.ResponseWriter, r *http.Request) {
 	// multipart/form-data 形式でファイルを受け取ります。
+	// ParseMultipartForm の引数は「メモリ上に保持する最大量」であって、
+	// アップロード全体の上限ではないため、MaxBytesReader でも制限します。
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
 	// ParseMultipartForm の引数は最大メモリ使用量（バイト）です。
-	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB
+	if err := r.ParseMultipartForm(maxImportBytes); err != nil {
 		http.Error(w, "ファイルの解析に失敗しました", http.StatusBadRequest)
 		return
 	}
@@ -1570,18 +1741,25 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	// <DT><A ...> のパターンでブックマークを抽出します。
 	// (?s) は . が改行にもマッチするオプションです。
 	reBookmark := regexp.MustCompile(`(?i)<DT><A\s([^>]+)>([^<]*)</A>`)
-	reHref    := regexp.MustCompile(`(?i)HREF="([^"]+)"`)
+	reHref := regexp.MustCompile(`(?i)HREF="([^"]+)"`)
 	reAddDate := regexp.MustCompile(`(?i)ADD_DATE="([^"]+)"`)
-	reTags    := regexp.MustCompile(`(?i)TAGS="([^"]*)"`)
+	reTags := regexp.MustCompile(`(?i)TAGS="([^"]*)"`)
 	// <DD> タグで説明文を取得します。
 	reDD := regexp.MustCompile(`(?i)<DD>([^\n<]+)`)
 
 	matches := reBookmark.FindAllStringSubmatchIndex(doc, -1)
 
 	imported := 0
-	skipped  := 0
+	skipped := 0
 
-	for _, matchIdx := range matches {
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "トランザクション開始エラー", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	for i, matchIdx := range matches {
 		// matchIdx[2],matchIdx[3] が属性部分、matchIdx[4],matchIdx[5] がタイトルです。
 		attrs := doc[matchIdx[2]:matchIdx[3]]
 		// エクスポート時に &lt; などへエスケープされた特殊文字を元に戻します。
@@ -1593,6 +1771,12 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		url := html.UnescapeString(hrefMatch[1])
+		validatedURL, err := validateHTTPURL(url)
+		if err != nil {
+			skipped++
+			continue
+		}
+		url = validatedURL
 
 		// ADD_DATE（Unixタイムスタンプ）を time.Time に変換します。
 		var createdAt time.Time
@@ -1617,13 +1801,20 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 
 		// <DD> タグの説明文を取得します（<A>タグの直後を探します）。
 		excerpt := ""
-		afterA := doc[matchIdx[1]:]
+		// 次の <DT><A> までを現在のブックマークの範囲として扱います。
+		// 範囲を区切らないと、現在のブックマークに <DD> がない場合に
+		// 次のブックマークの説明文を誤って拾うことがあります。
+		nextBookmarkStart := len(doc)
+		if i+1 < len(matches) {
+			nextBookmarkStart = matches[i+1][0]
+		}
+		afterA := doc[matchIdx[1]:nextBookmarkStart]
 		if m := reDD.FindStringSubmatch(afterA); len(m) > 1 {
 			excerpt = html.UnescapeString(strings.TrimSpace(m[1]))
 		}
 
 		// URLが重複している場合はスキップします（INSERT OR IGNORE）。
-		result, err := db.Exec(
+		result, err := tx.Exec(
 			`INSERT OR IGNORE INTO bookmarks (url, title, excerpt, created_at) VALUES (?, ?, ?, ?)`,
 			url, title, excerpt, createdAt,
 		)
@@ -1644,17 +1835,33 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 		// タグを処理します。存在しないタグは新規作成します。
 		for _, name := range tagNames {
 			// INSERT OR IGNORE でタグが存在しなければ作成します。
-			db.Exec(`INSERT OR IGNORE INTO tags (name) VALUES (?)`, name)
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO tags (name) VALUES (?)`, name); err != nil {
+				http.Error(w, "タグ保存エラー: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 
 			var tagID int
-			db.QueryRow(`SELECT id FROM tags WHERE name = ?`, name).Scan(&tagID)
+			if err := tx.QueryRow(`SELECT id FROM tags WHERE name = ?`, name).Scan(&tagID); err != nil {
+				http.Error(w, "タグ取得エラー: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 			if tagID > 0 {
-				db.Exec(`INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
-					bookmarkID, tagID)
+				if _, err := tx.Exec(
+					`INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
+					bookmarkID, tagID,
+				); err != nil {
+					http.Error(w, "タグ紐付けエラー: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 		}
 
 		imported++
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "コミットエラー: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// 結果をJSONで返します。
