@@ -110,10 +110,20 @@ button:hover {
 /* ===== ヘッダーボタン群のPico CSSリセット =====
    Pico が button に高い詳細度でプライマリカラーを当てるため、
    .header-actions button で明示的に上書きします。 */
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 /* 全ヘッダーボタン：ゴーストスタイルで統一
@@ -472,6 +482,7 @@ button:hover {
 #bulk-bar {
   display: none;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   background: var(--s-accent);
   color: #fff;
@@ -507,6 +518,53 @@ button:hover {
 #bulk-bar .bulk-cancel:hover {
   color: #fff;
   background: transparent;
+}
+
+@media (max-width: 640px) {
+  body {
+    padding: 16px;
+  }
+
+  .main-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .header-actions button,
+  .header-actions .header-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 96px;
+  }
+
+  #bulk-bar {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  #bulk-count {
+    width: 100%;
+  }
+
+  #bulk-bar button,
+  #bulk-tag-dropdown-wrapper,
+  #bulk-tag-remove-dropdown-wrapper {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  #bulk-tag-btn,
+  #bulk-tag-remove-btn {
+    width: 100%;
+  }
+
+  #bulk-bar .bulk-cancel {
+    margin-left: 0;
+  }
 }
 
 /* タグ追加・削除 共通ドロップダウンスタイル */

@@ -5,6 +5,7 @@ let activeTag = null;    // 現在選択中のフィルタータグ名（null = 
 let selectedIds = new Set(); // バッチ選択中のブックマークID集合
 let pendingImageUrl = ''; // メタデータ取得で得たOG画像URL（フォーム送信まで保持）
 let currentPage = 1;     // 現在表示しているページ番号（1始まり）
+let tagInputInitialized = false; // タグ入力欄のイベント登録が済んでいるか
 const PAGE_SIZE = 50;    // 1ページあたりの表示件数
 
 // OG画像がない・読み込み失敗時に使うSVGプレースホルダーです。
@@ -25,9 +26,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ===== 認証 =====
 
 async function checkAuth() {
-  const res = await fetch('/api/bookmarks');
+  let res;
+  try {
+    res = await fetch('/api/bookmarks');
+  } catch (err) {
+    console.error('認証確認に失敗しました:', err);
+    showLoginScreen('サーバーに接続できません');
+    return;
+  }
+
   if (res.status === 401) {
     showLoginScreen();
+  } else if (!res.ok) {
+    console.error('認証確認APIがエラーを返しました:', res.status);
+    showLoginScreen('サーバーエラーが発生しました');
   } else {
     // 認証確認に使ったレスポンスは一覧データそのものなので、
     // showMainScreen に渡して再利用します（同じAPIを2回呼ぶ無駄を省く）。
@@ -35,7 +47,7 @@ async function checkAuth() {
   }
 }
 
-function showLoginScreen() {
+function showLoginScreen(message = '') {
   // 検索語・タグフィルター・選択状態をリセットします。
   // ログアウト（またはセッション切れ）後に別の人がログインしたとき、
   // 前の利用状態が画面に残らないようにするためです。
@@ -52,6 +64,14 @@ function showLoginScreen() {
 
   document.getElementById('login-screen').style.display = 'block';
   document.getElementById('main-screen').style.display = 'none';
+  const loginError = document.getElementById('login-error');
+  if (message) {
+    loginError.textContent = message;
+    loginError.style.display = 'block';
+  } else {
+    loginError.textContent = 'パスワードが違います';
+    loginError.style.display = 'none';
+  }
 }
 
 // preloadedRes：checkAuth が取得済みの一覧レスポンス（あれば再利用します）。
@@ -76,7 +96,9 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     document.getElementById('login-error').style.display = 'none';
     showMainScreen();
   } else {
-    document.getElementById('login-error').style.display = 'block';
+    const loginError = document.getElementById('login-error');
+    loginError.textContent = 'パスワードが違います';
+    loginError.style.display = 'block';
   }
 });
 
@@ -605,6 +627,9 @@ document.getElementById('bookmark-form').addEventListener('submit', async (e) =>
 // ===== タグオートコンプリート =====
 
 function setupTagInput() {
+  if (tagInputInitialized) return;
+  tagInputInitialized = true;
+
   const input    = document.getElementById('tag-input');
   const dropdown = document.getElementById('tag-dropdown');
 
