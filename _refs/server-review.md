@@ -80,6 +80,13 @@
 - ローカルプロキシ経由では `X-Forwarded-For` の先頭IPを使う
 - 信頼していない接続元からの `X-Forwarded-For` は無視する
 
+将来の検討:
+
+- 公開コードとして配布する場合、Caddy/nginxを別コンテナ・別LXC・別ホストで動かす利用者も想定される。
+- 現状は接続元がループバックのときだけ転送ヘッダーを信頼するため、別ホストプロキシ構成では全アクセスがプロキシIP扱いになる。
+- これは安全側の挙動だが、必要になったら `SHIRUSHI_TRUSTED_PROXIES=127.0.0.1,::1,192.168.1.10` のような環境変数を追加し、明示されたプロキシIPだけ `X-Forwarded-For` / `X-Real-IP` を信頼する。
+- CIDR指定（例: `172.16.0.0/12`）まで許可するかは、Docker利用者の利便性と設定ミス時のリスクを見て判断する。
+
 ### 3. URLバリデーションが弱い
 
 対応状況: 対応済み（2026-06-13）
@@ -185,6 +192,19 @@ JSON API は `json.NewDecoder(r.Body)` で直接読み込んでおり、リク�
 対応案:
 
 - ログアウト時の削除Cookieにも `HttpOnly: true` と `SameSite: http.SameSiteStrictMode` を付ける。
+
+### 9-補足. HTTPS運用向けのSecure Cookie
+
+対応状況: 対応済み（2026-06-14）
+
+CaddyでHTTPS終端して外出先から使う本番運用向けに、環境変数でセッションCookieの `Secure` 属性を有効化できるようにしました。
+
+仕様:
+
+- `SHIRUSHI_COOKIE_SECURE=1` のとき、ログイン時の `session` Cookieに `Secure` を付ける
+- `SHIRUSHI_COOKIE_SECURE=1` のとき、ログアウト時の削除Cookieにも `Secure` を付ける
+- 未設定時は `Secure` を付けず、HTTPのローカル開発や宅内LAN直接アクセスでも従来通り動く
+- 本番Caddy運用では `SHIRUSHI_PASSWORD='...' SHIRUSHI_COOKIE_SECURE=1 ./shirushi` を想定する
 
 ### 10. HTTPサーバーのタイムアウトが未設定
 

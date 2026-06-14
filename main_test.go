@@ -788,12 +788,49 @@ func TestHandleLogin_SuccessCreatesSessionCookie(t *testing.T) {
 	if sessionCookie.SameSite != http.SameSiteStrictMode {
 		t.Errorf("SameSiteが違います: got %v, want Strict", sessionCookie.SameSite)
 	}
+	if sessionCookie.Secure {
+		t.Error("SHIRUSHI_COOKIE_SECURE 未設定なのに Secure が付いています")
+	}
 
 	sessionsMu.Lock()
 	_, exists := sessions[sessionCookie.Value]
 	sessionsMu.Unlock()
 	if !exists {
 		t.Error("発行されたセッションがサーバー側に保存されていません")
+	}
+}
+
+// TestHandleLogin_SecureCookieWhenEnabled：本番HTTPS向け設定でSecure Cookieになるかテストします。
+func TestHandleLogin_SecureCookieWhenEnabled(t *testing.T) {
+	resetSessions()
+	t.Setenv("SHIRUSHI_PASSWORD", "secret")
+	t.Setenv("SHIRUSHI_COOKIE_SECURE", "1")
+
+	body := strings.NewReader(`{"password":"secret"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/login", body)
+
+	handleLogin(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ステータスコードが違います: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := w.Result()
+	defer result.Body.Close()
+
+	var sessionCookie *http.Cookie
+	for _, cookie := range result.Cookies() {
+		if cookie.Name == "session" {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("session Cookieが見つかりません")
+	}
+	if !sessionCookie.Secure {
+		t.Error("SHIRUSHI_COOKIE_SECURE=1 なのに Secure が付いていません")
 	}
 }
 
@@ -965,6 +1002,42 @@ func TestHandleLogout_RemovesSessionAndCookie(t *testing.T) {
 	}
 	if expiredCookie.SameSite != http.SameSiteStrictMode {
 		t.Errorf("削除用CookieのSameSiteが違います: got %v, want Strict", expiredCookie.SameSite)
+	}
+	if expiredCookie.Secure {
+		t.Error("SHIRUSHI_COOKIE_SECURE 未設定なのに削除用Cookieへ Secure が付いています")
+	}
+}
+
+// TestHandleLogout_SecureCookieWhenEnabled：Secure Cookie利用時は削除CookieにもSecureが付くかテストします。
+func TestHandleLogout_SecureCookieWhenEnabled(t *testing.T) {
+	resetSessions()
+	t.Setenv("SHIRUSHI_COOKIE_SECURE", "1")
+
+	sessionsMu.Lock()
+	sessions["logout-token"] = time.Now().Add(time.Hour)
+	sessionsMu.Unlock()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
+	r.AddCookie(&http.Cookie{Name: "session", Value: "logout-token"})
+
+	handleLogout(w, r)
+
+	result := w.Result()
+	defer result.Body.Close()
+
+	var expiredCookie *http.Cookie
+	for _, cookie := range result.Cookies() {
+		if cookie.Name == "session" {
+			expiredCookie = cookie
+			break
+		}
+	}
+	if expiredCookie == nil {
+		t.Fatal("削除用のsession Cookieが返っていません")
+	}
+	if !expiredCookie.Secure {
+		t.Error("SHIRUSHI_COOKIE_SECURE=1 なのに削除用Cookieへ Secure が付いていません")
 	}
 }
 

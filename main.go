@@ -309,6 +309,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secureSessionCookie(),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   86400, // 24時間（秒）
 	})
@@ -434,12 +435,20 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secureSessionCookie(),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// secureSessionCookie：セッションCookieに Secure 属性を付けるか判定します。
+// Secure 属性が付いたCookieはHTTPS通信でしか送られません。
+// CaddyでHTTPS終端する本番運用では有効にし、HTTPのローカル開発では未設定にします。
+func secureSessionCookie() bool {
+	return os.Getenv("SHIRUSHI_COOKIE_SECURE") == "1"
 }
 
 // createTable：新規インストール時に必要なテーブルをすべて作成する関数です。
