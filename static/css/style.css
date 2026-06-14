@@ -134,13 +134,17 @@ button:hover {
   color: var(--s-text) !important;
   border: 1px solid var(--s-border-hover) !important;
   border-radius: 4px;
+  box-sizing: border-box;
+  min-height: 36px;
   padding: 6px 14px;
   font-size: 0.875rem;
+  margin: 0 !important;
   /* <a> 用のリセット：Pico CSS のリンクスタイル（色・下線）を打ち消します */
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  line-height: normal;
+  justify-content: center;
+  line-height: 1;
   cursor: pointer;
 }
 
