@@ -93,6 +93,12 @@ func resetSessions() {
 	sessionsMu.Lock()
 	sessions = map[string]time.Time{}
 	sessionsMu.Unlock()
+
+	loginAttemptsMu.Lock()
+	loginAttempts = map[string]loginAttempt{}
+	loginAttemptsMu.Unlock()
+
+	nowFunc = time.Now
 }
 
 // newMultipartImportRequest：インポートAPI用のmultipart/form-dataリクエストを作る補助関数です。
@@ -811,6 +817,105 @@ func TestHandleLogin_WrongPassword(t *testing.T) {
 	sessionsMu.Unlock()
 	if count != 0 {
 		t.Errorf("失敗ログインでセッションが作られています: got %d, want 0", count)
+	}
+}
+
+// TestHandleLogin_LocksAfterRepeatedFailures：同じIPからの連続失敗で一時ロックされるかテストします。
+func TestHandleLogin_LocksAfterRepeatedFailures(t *testing.T) {
+	resetSessions()
+	t.Setenv("SHIRUSHI_PASSWORD", "secret")
+
+	baseTime := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return baseTime }
+	t.Cleanup(func() { nowFunc = time.Now })
+
+	for i := 0; i < maxLoginFailures-1; i++ {
+		body := strings.NewReader(`{"password":"wrong"}`)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/login", body)
+		r.RemoteAddr = "203.0.113.10:12345"
+
+		handleLogin(w, r)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%d回目の失敗ステータスが違います: got %d, want %d", i+1, w.Code, http.StatusUnauthorized)
+		}
+	}
+
+	body := strings.NewReader(`{"password":"wrong"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	r.RemoteAddr = "203.0.113.10:12345"
+
+	handleLogin(w, r)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("上限到達時のステータスが違います: got %d, want %d", w.Code, http.StatusTooManyRequests)
+	}
+
+	body = strings.NewReader(`{"password":"secret"}`)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/login", body)
+	r.RemoteAddr = "203.0.113.10:12345"
+
+	handleLogin(w, r)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("ロック中の正しいパスワードが拒否されていません: got %d, want %d", w.Code, http.StatusTooManyRequests)
+	}
+}
+
+// TestHandleLogin_AllowsAfterLockoutExpires：ロック時間が過ぎたらログインできるかテストします。
+func TestHandleLogin_AllowsAfterLockoutExpires(t *testing.T) {
+	resetSessions()
+	t.Setenv("SHIRUSHI_PASSWORD", "secret")
+
+	currentTime := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return currentTime }
+	t.Cleanup(func() { nowFunc = time.Now })
+
+	for i := 0; i < maxLoginFailures; i++ {
+		body := strings.NewReader(`{"password":"wrong"}`)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/login", body)
+		r.RemoteAddr = "203.0.113.20:12345"
+
+		handleLogin(w, r)
+	}
+
+	currentTime = currentTime.Add(loginLockoutDuration + time.Second)
+
+	body := strings.NewReader(`{"password":"secret"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/login", body)
+	r.RemoteAddr = "203.0.113.20:12345"
+
+	handleLogin(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ロック期限後のログインステータスが違います: got %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+// TestGetClientIP_UsesForwardedHeaderFromLocalProxy：ローカルプロキシ経由では転送元IPを使うかテストします。
+func TestGetClientIP_UsesForwardedHeaderFromLocalProxy(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", nil)
+	r.RemoteAddr = "127.0.0.1:12345"
+	r.Header.Set("X-Forwarded-For", "203.0.113.30, 10.0.0.1")
+
+	if got := getClientIP(r); got != "203.0.113.30" {
+		t.Fatalf("クライアントIPが違います: got %q, want %q", got, "203.0.113.30")
+	}
+}
+
+// TestGetClientIP_IgnoresForwardedHeaderFromUntrustedRemote：直接接続時は偽装ヘッダーを無視するかテストします。
+func TestGetClientIP_IgnoresForwardedHeaderFromUntrustedRemote(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/login", nil)
+	r.RemoteAddr = "198.51.100.10:12345"
+	r.Header.Set("X-Forwarded-For", "203.0.113.30")
+
+	if got := getClientIP(r); got != "198.51.100.10" {
+		t.Fatalf("クライアントIPが違います: got %q, want %q", got, "198.51.100.10")
 	}
 }
 

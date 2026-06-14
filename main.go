@@ -71,6 +71,10 @@ var db *sql.DB
 var (
 	sessions   = map[string]time.Time{} // token -> 有効期限
 	sessionsMu sync.Mutex
+
+	loginAttempts   = map[string]loginAttempt{} // client IP -> 失敗回数とロック期限
+	loginAttemptsMu sync.Mutex
+	nowFunc         = time.Now
 )
 
 const (
@@ -87,7 +91,23 @@ const (
 
 	// maxImportBytes：インポートHTMLの最大サイズです。
 	maxImportBytes int64 = 10 << 20 // 10MB
+
+	// maxLoginFailures：同じIPから許可する連続ログイン失敗回数です。
+	maxLoginFailures = 5
+
+	// loginFailureWindow：この時間を過ぎた古い失敗回数はリセットします。
+	loginFailureWindow = 15 * time.Minute
+
+	// loginLockoutDuration：失敗回数が上限に達したIPを一時的にロックする時間です。
+	loginLockoutDuration = 15 * time.Minute
 )
+
+// loginAttempt：IPアドレスごとのログイン失敗状態を保存する構造体です。
+type loginAttempt struct {
+	Failures     int
+	FirstFailure time.Time
+	LockedUntil  time.Time
+}
 
 func main() {
 	var err error
@@ -177,7 +197,7 @@ func cleanupExpiredSessions() {
 	// time.Tick は指定間隔ごとに値が届くチャネルを返します。
 	// for range で受け取ることで「1時間ごとに1回ループが回る」動きになります。
 	for range time.Tick(1 * time.Hour) {
-		now := time.Now()
+		now := nowFunc()
 		sessionsMu.Lock()
 		for token, expiry := range sessions {
 			if now.After(expiry) {
@@ -241,6 +261,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := getClientIP(r)
+	if isLoginLocked(clientIP) {
+		http.Error(w, "ログイン試行が多すぎます。しばらく待ってから再試行してください", http.StatusTooManyRequests)
+		return
+	}
+
 	// 環境変数からパスワードを取得して照合します。
 	// パスワードをコードに直接書かず環境変数にする理由は、
 	// ソースコードをgitで管理しても漏洩しないようにするためです。
@@ -252,9 +278,14 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 常に同じ時間で比較するため、その手がかりを与えません（一致すると1を返します）。
 	if correctPassword == "" ||
 		subtle.ConstantTimeCompare([]byte(body.Password), []byte(correctPassword)) != 1 {
+		if recordLoginFailure(clientIP) {
+			http.Error(w, "ログイン試行が多すぎます。しばらく待ってから再試行してください", http.StatusTooManyRequests)
+			return
+		}
 		http.Error(w, "パスワードが違います", http.StatusUnauthorized)
 		return
 	}
+	clearLoginFailures(clientIP)
 
 	// crypto/rand で暗号学的に安全なランダムトークンを生成します。
 	// math/rand と違い、予測不可能な値が生成されます。
@@ -267,7 +298,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// セッションを保存します（有効期限は24時間）。
 	sessionsMu.Lock()
-	sessions[token] = time.Now().Add(24 * time.Hour)
+	sessions[token] = nowFunc().Add(24 * time.Hour)
 	sessionsMu.Unlock()
 
 	// Cookieにトークンをセットします。
@@ -284,6 +315,107 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// getClientIP：ログイン制限に使うクライアントIPを取り出します。
+// Caddyなどのリバースプロキシが同じホストから接続している場合だけ、
+// X-Forwarded-For / X-Real-IP を信頼します。直接アクセス時にこれらのヘッダーを
+// 無条件に信じると、攻撃者が任意のIPを名乗れてしまうためです。
+func getClientIP(r *http.Request) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP == nil {
+		return remoteHost
+	}
+
+	if isTrustedProxyIP(remoteIP) {
+		if ip := firstForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
+			return ip
+		}
+		if ip := validHeaderIP(r.Header.Get("X-Real-IP")); ip != "" {
+			return ip
+		}
+	}
+
+	return remoteIP.String()
+}
+
+// isTrustedProxyIP：プロキシ用ヘッダーを信頼してよい接続元か判定します。
+// CaddyとShirushiを同じLXC/ホスト内で動かす想定なので、まずはループバックだけを信頼します。
+func isTrustedProxyIP(ip net.IP) bool {
+	return ip.IsLoopback()
+}
+
+// firstForwardedIP：X-Forwarded-For の先頭IPを取り出します。
+// X-Forwarded-For は「元のクライアント, プロキシ1, プロキシ2」のようにカンマ区切りです。
+func firstForwardedIP(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		if ip := validHeaderIP(part); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+// validHeaderIP：ヘッダー文字列がIPアドレスとして妥当なら正規化して返します。
+func validHeaderIP(value string) string {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
+}
+
+// isLoginLocked：対象IPがロック中か確認します。
+func isLoginLocked(clientIP string) bool {
+	now := nowFunc()
+
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+
+	attempt, ok := loginAttempts[clientIP]
+	if !ok {
+		return false
+	}
+	if attempt.LockedUntil.After(now) {
+		return true
+	}
+	if !attempt.LockedUntil.IsZero() || now.Sub(attempt.FirstFailure) > loginFailureWindow {
+		delete(loginAttempts, clientIP)
+	}
+	return false
+}
+
+// recordLoginFailure：ログイン失敗を記録し、上限到達時はロック状態にします。
+func recordLoginFailure(clientIP string) bool {
+	now := nowFunc()
+
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+
+	attempt := loginAttempts[clientIP]
+	if attempt.FirstFailure.IsZero() || now.Sub(attempt.FirstFailure) > loginFailureWindow {
+		attempt = loginAttempt{FirstFailure: now}
+	}
+	attempt.Failures++
+	if attempt.Failures >= maxLoginFailures {
+		attempt.LockedUntil = now.Add(loginLockoutDuration)
+		loginAttempts[clientIP] = attempt
+		return true
+	}
+
+	loginAttempts[clientIP] = attempt
+	return false
+}
+
+// clearLoginFailures：正しいログインに成功したIPの失敗記録を消します。
+func clearLoginFailures(clientIP string) {
+	loginAttemptsMu.Lock()
+	delete(loginAttempts, clientIP)
+	loginAttemptsMu.Unlock()
 }
 
 // handleLogout：セッションを削除してログアウトするAPIです。
