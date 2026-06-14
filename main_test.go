@@ -922,6 +922,56 @@ func TestMigrateAddUniqueURL_PreservesBookmarkTags(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphanedBookmarkTags：親が存在しない古いタグ紐付けだけ削除されるかテストします。
+func TestCleanupOrphanedBookmarkTags(t *testing.T) {
+	setupTestDB(t)
+
+	bookmarkID := createTestBookmark(t, "https://example.com")
+	validTagID := createTestTag(t, "go")
+	orphanTagID := createTestTag(t, "github")
+
+	if _, err := db.Exec(
+		`INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
+		bookmarkID, validTagID,
+	); err != nil {
+		t.Fatalf("有効なタグ紐付け作成エラー: %v", err)
+	}
+
+	// 実DBに残っていた古い不整合を再現するため、この挿入時だけ外部キー制約を無効化します。
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatalf("外部キー制約OFFエラー: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
+		9999, orphanTagID,
+	); err != nil {
+		t.Fatalf("孤児タグ紐付け作成エラー: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`,
+		bookmarkID, 9999,
+	); err != nil {
+		t.Fatalf("存在しないタグへの紐付け作成エラー: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatalf("外部キー制約ONエラー: %v", err)
+	}
+
+	cleanupOrphanedBookmarkTags()
+
+	if got := countBookmarkTags(t); got != 1 {
+		t.Fatalf("クリーンアップ後のタグ紐付け件数が違います: got %d, want 1", got)
+	}
+
+	tags, err := getTagsByBookmarkID(bookmarkID)
+	if err != nil {
+		t.Fatalf("タグ取得エラー: %v", err)
+	}
+	if len(tags) != 1 || tags[0].Name != "go" {
+		t.Errorf("有効なタグ紐付けが残っていません: got %+v", tags)
+	}
+}
+
 // TestHandleImport_DDDoesNotLeakToPreviousBookmark：<DD> が次のブックマークから漏れないかテストします。
 func TestHandleImport_DDDoesNotLeakToPreviousBookmark(t *testing.T) {
 	setupTestDB(t)

@@ -24,6 +24,21 @@
 - マイグレーション前に `bookmark_tags` を一時テーブルへ退避し、`bookmarks` 再作成後に存在する `bookmark_id` / `tag_id` だけ復元する。
 - または、単純な `CREATE UNIQUE INDEX IF NOT EXISTS ... ON bookmarks(url)` で足りるか検討する。
 
+### 1-補足. 既存DBの孤児 bookmark_tags
+
+対応状況: 対応済み（2026-06-14）
+
+実DB `shirushi.db` を確認したところ、`bookmarks` に存在しないIDを指す `bookmark_tags` が4件ありました。
+起動時マイグレーションで、親が存在しない `bookmark_tags` だけを削除するクリーンアップを追加しました。
+
+確認結果:
+
+- 実行前: `bookmarks=477`, `tags=27`, `bookmark_tags=204`
+- 実行後: `bookmarks=477`, `tags=27`, `bookmark_tags=200`
+- 削除されたのは無効なタグ紐付け4件のみ
+- `PRAGMA foreign_key_check;` は実行後に空になった
+- `shirushi.db.backup-20260614-183708` に実行前バックアップを作成済み
+
 ### 2. メタデータ取得のリダイレクト先検査
 
 対応状況: 対応済み（2026-06-13）

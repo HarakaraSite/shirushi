@@ -1,5 +1,6 @@
 # データベースファイル
 shirushi.db
+shirushi.db.backup-*
 
 # ビルド済みバイナリ
 shirushi

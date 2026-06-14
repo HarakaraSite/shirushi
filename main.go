@@ -427,6 +427,7 @@ func runMigrations() {
 			log.Fatal("タグテーブル作成エラー:", err)
 		}
 	}
+	cleanupOrphanedBookmarkTags()
 
 	// url カラムに UNIQUE 制約が付いているか確認します。
 	// PRAGMA index_list でテーブルのインデックス一覧を取得できます。
@@ -478,6 +479,29 @@ func hasUniqueURLIndex() bool {
 		infoRows.Close()
 	}
 	return false
+}
+
+// cleanupOrphanedBookmarkTags：存在しないブックマークやタグを指す古い紐付けを削除します。
+// 過去に外部キー制約が無効な状態で削除されたデータがあると、bookmark_tags だけが残ることがあります。
+// 本体の bookmarks / tags は消さず、「親が存在しない中間テーブルの行」だけを掃除します。
+func cleanupOrphanedBookmarkTags() {
+	result, err := db.Exec(`
+		DELETE FROM bookmark_tags
+		WHERE NOT EXISTS (
+			SELECT 1 FROM bookmarks b WHERE b.id = bookmark_tags.bookmark_id
+		)
+		OR NOT EXISTS (
+			SELECT 1 FROM tags t WHERE t.id = bookmark_tags.tag_id
+		)
+	`)
+	if err != nil {
+		log.Fatal("タグ紐付けクリーンアップエラー:", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err == nil && deleted > 0 {
+		fmt.Printf("マイグレーション: 無効なタグ紐付けを %d 件削除しました\n", deleted)
+	}
 }
 
 // migrateAddUniqueURL：既存データを保持しながら url カラムに UNIQUE 制約を追加します。
