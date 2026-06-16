@@ -19,7 +19,10 @@
 
   <!-- ===== ログイン画面 ===== -->
   <div id="login-screen" style="display:none; max-width:320px; margin:80px auto;">
-    <h1 style="margin-bottom:24px;">Shirushi</h1>
+    <h1 class="app-title login-title">
+      <img src="/favicon.svg" alt="" class="app-title-icon">
+      <span>Shirushi</span>
+    </h1>
     <form id="login-form" style="background:#fff; padding:16px; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
       <input type="text" name="username" value="shirushi" autocomplete="username" hidden>
       <input type="password" id="input-password" placeholder="パスワード" autocomplete="current-password" required>
@@ -33,7 +36,10 @@
 
     <!-- ヘッダー -->
     <div class="main-header">
-      <h1>Shirushi</h1>
+      <h1 class="app-title">
+        <img src="/favicon.svg" alt="" class="app-title-icon">
+        <span>Shirushi</span>
+      </h1>
       <div class="header-actions">
         <!-- 追加ボタン：クリックでモーダルを「追加モード」で開く -->
         <button type="button" onclick="openModal()">＋ 追加</button>

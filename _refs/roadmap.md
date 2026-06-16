@@ -202,6 +202,48 @@ Shirushiに蓄積した関心の流れを外部ツールへ渡せるようにす
 - 既存DBの相対 `image_url` を調査・補正する。
 - 変換できない相対URLは保存しない。
 
+### Shiori/Shirushi間のメタデータ取得差分
+
+サムネイルやメモについて、Shioriでは取得できるがShirushiでは取得できないパターン、またその逆のパターンがある。
+
+確認例:
+
+- `https://syncthing.net` はShioriではサムネイル取得できるが、Shirushiでは取得できない可能性がある。
+- `https://jsfdb.jp/` は逆にShirushi側で取得できるパターンがある。
+
+想定原因:
+
+- `og:image` / `twitter:image` / `<meta name="description">` など、参照するメタタグの優先順位の違い。
+- 相対URLを絶対URLへ変換する処理の違い。
+- HTML構造やメタタグの書き方の違い。
+- Shiori側が本文抽出やフォールバックをより多く持っている可能性。
+
+影響:
+
+- サムネイルやメモが欠けるだけで、ブックマーク本体やタグ操作には影響しない。
+- 優先度は低め。v1公開前に必須ではない。
+
+あとで確認するなら:
+
+- ShioriとShirushiで同じURLを登録し、保存された `title` / `excerpt` / `image_url` を比較する。
+- `fetchMetadata()` の抽出対象に `twitter:image` や相対URL解決を追加するか検討する。
+- メモ抽出は上書きではなく、既存メモを尊重する方針を維持する。
+
+軽い原因推測:
+
+- 現在のShirushiは `image_url` を `og:image` からしか取得しない。
+- `syncthing.net` はページ内にロゴ画像や説明文はあるが、Shirushiが参照する `og:image` がない、または相対URL/別形式の可能性がある。
+- Shioriは本文画像、favicon、`twitter:image` などへフォールバックしている可能性がある。
+- `jsfdb.jp` はタイトルと短い説明文がHTML上で明確なため、Shirushiの `<title>` / `meta description` 系フォールバックと相性がよい可能性がある。
+- メモの差分も同様に、Shirushiが `og:description` と `meta name="description"` だけを見ており、本文中の主要説明を抽出していないことが原因になり得る。
+
+改善するなら優先順:
+
+1. `twitter:title` / `twitter:description` / `twitter:image` を見る。
+2. `og:image` / `twitter:image` が相対URLならページURL基準で絶対URLへ変換する。
+3. 画像がなければ `link rel="icon"` / `apple-touch-icon` にフォールバックする。
+4. description がなければ本文先頭の主要テキストを軽く拾う。
+
 ## v1の完成条件案
 
 最低限:

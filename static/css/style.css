@@ -62,6 +62,23 @@ h1 {
   font-size: 1.5rem;
 }
 
+.app-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.2;
+}
+
+.app-title-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.login-title {
+  margin-bottom: 24px;
+}
+
 input, textarea {
   padding: 8px;
   border: 1px solid var(--s-border-hover);
