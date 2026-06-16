@@ -1,6 +1,6 @@
 # Shirushi 機能詳細ドキュメント
 
-> 更新日: 2026-06-02
+> 更新日: 2026-06-16
 
 ---
 
@@ -80,15 +80,26 @@ CREATE TABLE bookmark_tags (
 
 - **シングルユーザー** のパスワード認証
 - パスワードは環境変数 `SHIRUSHI_PASSWORD` で指定（ハードコード禁止）
+- パスワード照合は `crypto/subtle.ConstantTimeCompare` でタイミング攻撃を防止
 - ログイン成功時に **セッショントークン**（`crypto/rand` で生成した64文字16進数）を発行
 - トークンは `HttpOnly + SameSite=Strict` Cookie で保持
+  - `SHIRUSHI_COOKIE_SECURE=1` を設定すると `Secure` 属性も付与（CaddyでHTTPS終端する本番運用向け）
+  - ログアウト時の削除Cookieもログイン時と同じ属性で発行（属性不一致による削除漏れを防止）
 - セッションはサーバーメモリ上の `map[string]time.Time` で管理（有効期限: 24時間）
+  - `cleanupExpiredSessions()` ゴルーチンが1時間ごとに期限切れセッションを掃除
 - `sync.Mutex` で並行アクセスを安全に処理
 
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/login` | ログイン（Cookie発行） |
 | POST | `/api/logout` | ログアウト（Cookie削除） |
+
+### ログインのブルートフォース対策
+
+- 同じIPから **15分以内に5回** ログイン失敗すると、そのIPを **15分間ロック**（HTTP `429 Too Many Requests`）
+- 正しいパスワードでログインできた時点で、そのIPの失敗記録を削除
+- 接続元がループバックの場合のみ `X-Forwarded-For` / `X-Real-IP` を信頼（Caddyが同一ホストで動く前提）。直接接続時は転送ヘッダーを無視し、ヘッダー偽装でロックを回避できないようにする
+- 別ホスト・別コンテナのCaddy構成では、将来的に `SHIRUSHI_TRUSTED_PROXIES` 環境変数で信頼するプロキシIPを明示する案がある（未実装、詳細は `_refs/caddy-deployment.md`）
 
 ---
 
@@ -206,6 +217,19 @@ WHERE句を動的に組み立てます（条件スライスを `AND` で結合�
 - レスポンスボディは最大 **1MB** に制限（`io.LimitReader`）
 - User-Agent を設定してアクセス拒否を回避
 
+### SSRF対策
+
+- `http.Transport.DialContext` をカスタム実装し、接続先IPを解決後に検査
+  - ループバック・プライベートIP・リンクローカル・未指定アドレスへの接続を拒否（DNSリバインディング対策として、ホスト名解決ではなく実際に接続するIPで判定）
+  - 環境変数 `SHIRUSHI_ALLOW_PRIVATE_FETCH=1` で検査を無効化できる（社内ツールなど用途限定）
+- `CheckRedirect` でリダイレクトを検査（リダイレクト回数制限、許可スキーム外への遷移を拒否）
+- レスポンスの `Content-Type` がHTML系でない場合は本文を読まずに中断
+
+### サーバー側URLバリデーション
+
+- ブックマーク作成・更新・メタデータ取得時、`validateHTTPURL()` で `net/url` パースを行い、`http` / `https` 以外のスキームを拒否
+- `javascript:` / `file:` などをDBに保存させない（フロント側の `safeHref()` と二重に防御）
+
 ---
 
 ## インポート・エクスポート
@@ -217,12 +241,24 @@ WHERE句を動的に組み立てます（条件スライスを `AND` で結合�
 
 ### インポート仕様
 
-- `multipart/form-data` でHTMLファイルを受け取る
+- `multipart/form-data` でHTMLファイルを受け取る（最大 **10MB**、`http.MaxBytesReader` で制限）
 - `<a href="..." add_date="...">タイトル</a>` の形式を正規表現でパース
+- 説明文（`<DD>`）の抜粋取得は、対象の `<A>` から次の `<DT><A` までの範囲に限定（次のブックマークの説明文を誤って拾わないようにするため）
 - タグ（`TAGS="..."` 属性）も読み込み、存在しないタグは自動作成
 - 重複URL（UNIQUE制約）は `INSERT OR IGNORE` でスキップ
+- インポート全体をトランザクション化し、タグ作成・紐付け時のDBエラーも確認してレスポンスに反映
 - レスポンス: `{"imported": 5, "skipped": 2}`
 - ※ インポート時のサムネイル（OG画像）取得は未対応
+
+---
+
+## サーバー全般の安全対策
+
+- **リクエストサイズ上限**: JSON API は `http.MaxBytesReader` で1MBに制限
+- **一括操作の件数上限**: 一括削除・一括タグ追加/削除のID配列は最大 **1000件**（`maxBulkIDs`）まで
+- **HTTPサーバーのタイムアウト**: `http.Server` を明示的に作成し、`ReadHeaderTimeout=5s` / `ReadTimeout=15s` / `WriteTimeout=30s` / `IdleTimeout=60s` を設定（低速クライアントによるリソース占有を防止）
+- **タグ紐付けAPIの存在確認**: 存在しない `bookmark_id` / `tag_id` を指定した場合は `404` を返す（以前は外部キー制約違反による `500` だった）
+- **DBマイグレーション安全性**: 起動時マイグレーションで、親ブックマークが存在しない孤児 `bookmark_tags` 行を削除するクリーンアップを実行（外部キー制約を有効にした際の不整合を解消）
 
 ---
 
@@ -323,7 +359,30 @@ WHERE句を動的に組み立てます（条件スライスを `AND` で結合�
 ### XSS対策
 
 - ユーザーデータをHTMLに埋め込む際は `escapeHtml()` でエスケープ
-- `onclick` 属性への JSON 直接埋め込みを避け、`bookmarkMap`（JS の `Map`）でデータ管理
+- `onclick` 属性への JSON 直接埋め込みを避け、`bookmarkMap` / `tagManagerMap`（JS の `Map`）でID経由のデータ管理
+- リンクURLは `safeHref()` で `http` / `https` のみ許可（`javascript:` などを無害化）
+
+### 認証エラーの一元処理
+
+- `apiFetch()` ラッパーで全API呼び出しを統一し、`401` 応答時はログイン画面へ自動遷移
+- `checkAuth()` は `401` 以外の異常系（サーバーエラー・不正なJSONなど）でもログイン画面へ戻す
+- ログアウト時は検索条件・選択状態・開いているモーダルをすべてリセット
+
+### ダークテーマ固定
+
+- `<html data-theme="dark">` を指定し、OS側のライト/ダーク設定に関わらず常にダークテーマで表示（Pico CSSの `:root:not([data-theme=dark])` がデフォルトテーマを上書きする問題への対処）
+
+### ヘッダー・ロゴ
+
+- ヘッダーとログイン画面に `favicon.svg` を使ったロゴアイコンを表示（`.app-title` / `.app-title-icon`）
+
+### レスポンシブ対応
+
+- ヘッダーのボタン群（`.header-actions`）と一括操作バー（`#bulk-bar`）に `flex-wrap` を設定し、スマホ幅でもボタンがはみ出さないようにした
+
+### パスワード入力
+
+- ログイン画面のパスワード入力に `autocomplete="current-password"` を指定（ブラウザのパスワードマネージャー対応）
 
 ---
 
@@ -353,6 +412,13 @@ go test -v -cover ./...
 | 項目 | 内容 |
 |------|------|
 | インポート時のサムネイル取得 | インポート後はOG画像が取得されないためプレースホルダーになる |
+| サムネイルの軽量化 | `image_url` は外部サイトの元画像URLをそのまま `<img>` に渡しており、表示時に毎回フルサイズをダウンロードしているため重い。サーバー側でリサイズ・ローカル保存・配信する仕組みを検討中（優先度: 中） |
+| サムネイル画像URLの相対パス | 一部ブックマークの `image_url` が相対パスのまま保存され、ブラウザがShirushi自身のパスとして解釈し404になる（優先度: 低） |
+| Shiori/Shirushi間のメタデータ取得差分 | `og:image` 優先のみのため、`twitter:image` 等しか持たないページでサムネイル・抜粋が欠ける場合がある（優先度: 低） |
+| ページサイズ切り替え | 現在は1ページ50件固定。50/100/200を選べるようにし `localStorage` に保存する案がある |
+| SHIRUSHI_TRUSTED_PROXIES | 別ホスト・別コンテナのCaddy構成向けに、信頼するプロキシIPを明示する環境変数（未実装） |
+
+v1公開に向けた計画（README/LICENSE/デプロイ手順整備など）は `_refs/roadmap.md` を参照。
 
 ---
 
