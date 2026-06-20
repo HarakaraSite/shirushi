@@ -1,6 +1,9 @@
 # データベースファイル
 shirushi.db
 shirushi.db.backup-*
+# WAL モードで作られる補助ファイル（-wal: 書き込みログ / -shm: 共有メモリ）
+shirushi.db-wal
+shirushi.db-shm
 
 # ビルド済みバイナリ
 shirushi

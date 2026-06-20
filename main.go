@@ -119,7 +119,21 @@ func main() {
 	// コネクションプールのうち「その時使われた1本」にしか適用されません。
 	// DSN で指定すれば、プールが新しいコネクションを開くたびに毎回適用されるため、
 	// どのリクエストでも bookmark_tags の ON DELETE CASCADE が確実に動作します。
-	db, err = sql.Open("sqlite", "./shirushi.db?_pragma=foreign_keys(1)")
+	//
+	// あわせて、複数リクエストの同時アクセスに備えた設定も DSN に入れます。
+	// database/sql は内部で複数のコネクションを開くため、SQLite のように
+	// 「書き込みは一度に1つ」という制約があるDBでは、同時アクセス時に
+	// 「database is locked」エラーが起きやすくなります。これを防ぐために:
+	//
+	//   - busy_timeout(5000): 書き込みロックが取れないとき、即エラーにせず
+	//     最大5000ミリ秒（5秒）まで待って自動でリトライします。
+	//     例えば「一括タグ付けの最中に一覧を再読み込み」しても、
+	//     少し待てば成功するようになり、ロックエラーをほぼ回避できます。
+	//   - journal_mode(WAL): Write-Ahead Logging モードにします。
+	//     読み取りと書き込みを並行できるようになり、ロックの競合自体が減ります。
+	//     WAL はファイルに記録されるDB自体の属性なので、一度設定すれば以後も維持されます。
+	db, err = sql.Open("sqlite",
+		"./shirushi.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		log.Fatal("データベース接続エラー:", err)
 	}
