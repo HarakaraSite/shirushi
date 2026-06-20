@@ -139,7 +139,13 @@ func main() {
 	}
 	defer db.Close()
 
-	// 2. テーブルが存在しない場合は作成します。
+	// 2. SHIRUSHI_PASSWORD が未設定のまま起動するとログインが一切できません。
+	// 設定し忘れに早い段階で気づけるよう、起動直後に確認して止めます。
+	if os.Getenv("SHIRUSHI_PASSWORD") == "" {
+		log.Fatal("SHIRUSHI_PASSWORD が設定されていません。環境変数にパスワードを指定してから起動してください。\n例: SHIRUSHI_PASSWORD='yourpassword' ./shirushi")
+	}
+
+	// 3. テーブルが存在しない場合は作成します。
 	createTable()
 	// 3. 既存DBに新しいカラムを追加するマイグレーションを実行します。
 	runMigrations()
@@ -186,11 +192,18 @@ func main() {
 	// 期限切れセッションの掃除をバックグラウンドで開始します。
 	go cleanupExpiredSessions()
 
-	fmt.Println("サーバーを起動しました: http://localhost:8181")
-	fmt.Println("API一覧を確認する: http://localhost:8181/api/bookmarks")
-	// 5. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
+	// 5. 待ち受けアドレスを環境変数 SHIRUSHI_ADDR で設定可能にします。
+	// デフォルトは ":8181"（全インターフェース）です。
+	// Caddy を同一ホストで動かす場合は "127.0.0.1:8181" を推奨します。
+	// 例: SHIRUSHI_ADDR=127.0.0.1:8181 SHIRUSHI_PASSWORD='...' ./shirushi
+	addr := os.Getenv("SHIRUSHI_ADDR")
+	if addr == "" {
+		addr = ":8181"
+	}
+	fmt.Println("サーバーを起動しました: http://localhost" + addr)
+	// 6. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
 	server := &http.Server{
-		Addr:              ":8181",
+		Addr:              addr,
 		Handler:           authMiddleware(http.DefaultServeMux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -949,9 +962,20 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 // syncBookmarkTags：ブックマークのタグ紐付けを同期するヘルパー関数です。
 // 既存の紐付けを全削除してから、新しいタグを挿入します（置き換え方式）。
 // タグが空リストの場合は全削除のみ行います。
+//
+// DELETE と INSERT をトランザクションにまとめる理由:
+// トランザクションなしだと、削除が成功したあと INSERT の途中でエラーが起きた場合に
+// 「タグが一部だけ消えた」中途半端な状態がDBに残ってしまいます。
+// トランザクションにすれば、全部成功か全部なかったことか、どちらかに必ずなります。
 func syncBookmarkTags(bookmarkID int, tags []Tag) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // Commit が呼ばれる前に return した場合の安全策です。
+
 	// 既存の紐付けをすべて削除します。
-	if _, err := db.Exec("DELETE FROM bookmark_tags WHERE bookmark_id = ?", bookmarkID); err != nil {
+	if _, err := tx.Exec("DELETE FROM bookmark_tags WHERE bookmark_id = ?", bookmarkID); err != nil {
 		return err
 	}
 	// 新しいタグを挿入します。
@@ -959,15 +983,14 @@ func syncBookmarkTags(bookmarkID int, tags []Tag) error {
 		if t.ID == 0 {
 			continue // IDが指定されていないタグはスキップします。
 		}
-		_, err := db.Exec(
+		if _, err := tx.Exec(
 			"INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)",
 			bookmarkID, t.ID,
-		)
-		if err != nil {
+		); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // getTagsByBookmarkID：指定したブックマークIDに紐付いたタグを取得するヘルパー関数です。
