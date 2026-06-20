@@ -272,4 +272,42 @@ v1以降:
 - RSS Feed
 - AI要約
 - 検索結果全体へのバルク操作
-- 信頼プロキシ設定
+- 信頼プロキシ設定（`SHIRUSHI_TRUSTED_PROXIES`）
+
+## v1以降: クライアント拡張
+
+### Firefox / Chrome 拡張
+
+現在のページを素早くShirushiに登録できる拡張。
+
+想定フロー:
+- 拡張アイコンをクリック → OGP取得済みの登録フォームが開く
+- タグを選んで保存
+- Shirushi の URL と `session` Cookie を拡張側で保持（または API トークンで認証）
+
+認証の検討:
+- ブラウザ拡張は Cookie をそのまま使える可能性があるが、オリジンが違うため CORS 設定が必要
+- API トークン認証（`Authorization: Bearer <token>`）を追加すると拡張・iOS 両方で使いやすくなる
+
+### iOS クライアント
+
+外出先でのブックマーク確認・追加を快適にする。
+
+想定機能:
+- 一覧・検索
+- タグフィルター
+- Safari の共有メニューから登録
+
+認証の検討:
+- Cookie 管理は iOS の `WKWebView` や `URLSession` で可能だが手間がかかる
+- **API トークン認証を先に追加しておくと iOS から叩きやすい**
+
+### API トークン認証（共通基盤）
+
+ブラウザ拡張・iOS クライアントを作るタイミングで実装する。
+
+実装案:
+- DB に `api_tokens` テーブルを追加（`token`, `name`, `created_at`, `last_used_at`）
+- `Authorization: Bearer <token>` ヘッダーを認証ミドルウェアで受け付ける
+- Web UI からトークンの発行・失効を管理できるページを追加
+- Cookie セッションとの共存（現行の Web UI はそのまま）
