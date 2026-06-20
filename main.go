@@ -366,6 +366,11 @@ func getClientIP(r *http.Request) string {
 		if ip := validHeaderIP(r.Header.Get("X-Real-IP")); ip != "" {
 			return ip
 		}
+		// Caddy の reverse_proxy は通常 X-Forwarded-For を自動付与します。
+		// ヘッダーが届かない場合はプロキシIP（通常 127.0.0.1）のままになり、
+		// 全クライアントのログイン試行が同じIPとしてカウントされます。
+		// 攻撃者が5回失敗させると正規ユーザーも15分ロックされる可能性があります。
+		// Caddy 構成では X-Forwarded-For を削除しないでください（_refs/caddy-deployment.md 参照）。
 	}
 
 	return remoteIP.String()
@@ -1052,6 +1057,30 @@ func recordExists(table string, id int) (bool, error) {
 	return exists, err
 }
 
+// checkAllExist：指定テーブルに ids の全IDが存在するか1クエリで確認します。
+// 1件でも存在しないIDがあればエラーを返します。
+// table はプログラム内の固定文字列だけを渡す前提で使います（SQL インジェクション防止）。
+func checkAllExist(table string, ids []int) error {
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	var found int
+	err := db.QueryRow(
+		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id IN (%s)", table, placeholders),
+		args...,
+	).Scan(&found)
+	if err != nil {
+		return fmt.Errorf("%s の確認エラー: %w", table, err)
+	}
+	if found != len(ids) {
+		return fmt.Errorf("指定された %s の一部が見つかりません", table)
+	}
+	return nil
+}
+
 // isUniqueConstraintError：エラーが UNIQUE 制約違反かどうかを判定するヘルパー関数です。
 // errors.As は、エラーが特定の型（ここでは *sqlite.Error）かどうかを調べ、
 // そうであれば中身を取り出してくれる標準の仕組みです。
@@ -1294,6 +1323,19 @@ func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.BookmarkIDs)*len(req.TagIDs) > maxBulkTagPairs {
 		http.Error(w, fmt.Sprintf("タグ一括追加は一度に%d組み合わせまでです", maxBulkTagPairs), http.StatusBadRequest)
+		return
+	}
+
+	// 存在チェック：送られてきた bookmark_id / tag_id が全件DBに存在するか確認します。
+	// INSERT OR IGNORE は FK 制約違反でエラーになる（IGNORE は UNIQUE/CHECK/NOTNULL のみ対象）ため、
+	// 不正IDが混じると操作全体が 500 になります。単体 API（handleAddTagToBookmark）が 404 を返すのと
+	// 挙動を揃えるために、事前に1クエリで確認して不足があれば 404 を返します。
+	if err := checkAllExist("bookmarks", req.BookmarkIDs); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err := checkAllExist("tags", req.TagIDs); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 

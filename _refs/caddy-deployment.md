@@ -42,6 +42,11 @@ shirushi.example.com {
 Caddyは通常、`reverse_proxy` 時に `X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` などを自動で付与します。
 Shirushi側では、接続元がループバックの場合だけ `X-Forwarded-For` / `X-Real-IP` を信頼します。
 
+> **注意**: `header_up -X-Forwarded-For` などで XFF を削除しないでください。
+> XFF がない状態で Caddy 経由アクセスが来ると、すべてのクライアントが
+> `127.0.0.1` 扱いになり、ログイン失敗カウントを共有します。
+> 攻撃者が5回失敗させると正規ユーザーも15分ログインできなくなります。
+
 ## LAN内だけで使う場合
 
 Caddyを使わず、宅内LANから直接 `http://192.168.x.x:8181` にアクセスする使い方も可能です。
