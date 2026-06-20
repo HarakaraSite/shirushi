@@ -63,26 +63,38 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 
 ## Caddy を使った HTTPS 運用
 
-Caddy を同一ホストで動かす構成（推奨）:
+Caddy を別の LXC コンテナで動かし、Shirushi を別の LXC コンテナに置く構成を想定しています。
+
+```
+インターネット
+  → Caddy LXC（HTTPS 終端）
+  → Proxmox ブリッジ
+  → Shirushi LXC（:8181）
+```
+
+**Caddyfile**（Caddy LXC 側）:
 
 ```caddyfile
 shirushi.example.com {
-    reverse_proxy 127.0.0.1:8181
+    reverse_proxy <Shirushi LXC の LAN IP>:8181
 }
 ```
 
-Shirushi の起動:
+**Shirushi の起動**（Shirushi LXC 側）:
 
 ```bash
-SHIRUSHI_ADDR=127.0.0.1:8181 \
 SHIRUSHI_PASSWORD='長くランダムなパスワード' \
 SHIRUSHI_COOKIE_SECURE=1 \
 ./shirushi
 ```
 
+待ち受けアドレスはデフォルトの `:8181`（全インターフェース）のままで構いません。
+Proxmox のファイアウォールで 8181 番ポートを Caddy LXC の IP からのみ許可しておくと安全です。
+
 > **注意**: `header_up -X-Forwarded-For` で XFF ヘッダーを削除しないでください。
-> XFF がない状態で全リクエストが同一 IP 扱いになり、ログイン失敗カウントを全クライアントで共有します。
-> Caddy の `reverse_proxy` はデフォルトで XFF を自動付与するため、通常は設定不要です。
+> XFF がない状態で全リクエストが Caddy LXC の IP として扱われ、ログイン失敗カウントを
+> 全クライアントで共有します。Caddy の `reverse_proxy` はデフォルトで XFF を自動付与するため、
+> 通常は設定不要です。
 
 ---
 
