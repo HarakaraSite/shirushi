@@ -138,6 +138,12 @@ go test -v -cover ./...
 
 ---
 
+## API
+
+エンドポイント・リクエスト・レスポンス・エラーコードの詳細は [docs/api.md](docs/api.md) を参照してください。
+
+---
+
 ## ライセンス
 
 [MIT](LICENSE)
