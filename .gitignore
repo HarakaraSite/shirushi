@@ -8,6 +8,9 @@ shirushi.db-shm
 # ビルド済みバイナリ
 shirushi
 
+# リリース用ビルド成果物
+dist/
+
 # Shioriの参照用クローン（サブモジュールではないため除外）
 _refs/shiori/
 
