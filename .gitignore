@@ -11,6 +11,9 @@ shirushi
 # Shioriの参照用クローン（サブモジュールではないため除外）
 _refs/shiori/
 
+# テスト出力（go test -coverprofile で生成）
+coverage.out
+
 # Playwright スナップショット・スクリーンショット（一時ファイル）
 .playwright-cli/
 *.png
