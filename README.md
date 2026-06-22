@@ -144,6 +144,13 @@ go test -v -cover ./...
 
 ---
 
+## ミラー
+
+このリポジトリは [Codeberg](https://codeberg.org/littleisland/shirushi) にミラーされています。
+正リポジトリは [forge.harakara.site/littleisland/shirushi](https://forge.harakara.site/littleisland/shirushi) です。
+
+---
+
 ## ライセンス
 
 [MIT](LICENSE)
