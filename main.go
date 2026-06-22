@@ -1995,6 +1995,8 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 
 	imported := 0
 	skipped := 0
+	// バックグラウンドでサムネイルを取得するために、新規登録した ID を収集します。
+	var importedIDs []int64
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -2075,6 +2077,7 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		bookmarkID, _ := result.LastInsertId()
+		importedIDs = append(importedIDs, bookmarkID)
 
 		// タグを処理します。存在しないタグは新規作成します。
 		for _, name := range tagNames {
@@ -2108,10 +2111,50 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 新規登録したブックマークのサムネイルをバックグラウンドで取得します。
+	// インポートのレスポンスはここで即座に返し、取得処理は非同期で行います。
+	if len(importedIDs) > 0 {
+		go batchFetchThumbnails(importedIDs)
+	}
+
 	// 結果をJSONで返します。
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{
 		"imported": imported,
 		"skipped":  skipped,
 	})
+}
+
+// batchFetchThumbnails：インポート後にバックグラウンドでサムネイルを取得します。
+// image_url が空のブックマークだけを対象に、1件ずつ順番に取得します。
+// 各リクエストの間に500msのウェイトを入れ、外部サーバーへの負荷を抑えます。
+func batchFetchThumbnails(ids []int64) {
+	for _, id := range ids {
+		// image_url がすでに入っているものはスキップします。
+		//（インポートファイルに image_url が含まれていた場合など）
+		var rawURL string
+		err := db.QueryRow(
+			`SELECT url FROM bookmarks WHERE id = ? AND (image_url IS NULL OR image_url = '')`,
+			id,
+		).Scan(&rawURL)
+		if err != nil {
+			// 該当なし（image_url 済み or 削除済み）はスキップ
+			continue
+		}
+
+		meta, err := fetchMetadata(rawURL)
+		if err != nil || meta.ImageURL == "" {
+			// 取得失敗・画像なしはスキップ（エラーにはしない）
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		db.Exec(
+			`UPDATE bookmarks SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')`,
+			meta.ImageURL, id,
+		)
+
+		// 外部サーバーへの連続アクセスを避けるためのウェイトです。
+		time.Sleep(500 * time.Millisecond)
+	}
 }
