@@ -21,3 +21,5 @@ coverage.out
 .playwright-cli/
 *.png
 *.webm
+# ドキュメント用画像は除外しない
+!docs/*.png

@@ -24,6 +24,10 @@ Caddy 経由で外出先からも使えます。
 
 ---
 
+![メイン画面](docs/screenshot.png)
+
+---
+
 ## ビルド
 
 ```bash
