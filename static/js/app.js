@@ -614,7 +614,7 @@ document.getElementById('bookmark-form').addEventListener('submit', async (e) =>
     closeModal();
     // 検索ワードとタグフィルターを維持したまま一覧を再読み込みします。
     const q = document.getElementById('search-input').value.trim();
-    await loadBookmarks(q, activeTag);
+    await loadBookmarks(q, activeTag, currentPage);
     await loadTags(); // 新規タグが追加された場合にフィルターチップを更新します
   } else {
     // サーバーが返すエラーメッセージ（例:「このURLは既に登録されています」）を
@@ -943,7 +943,7 @@ async function bulkRemoveTag(tagId) {
 
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
-    await loadBookmarks(q, activeTag);
+    await loadBookmarks(q, activeTag, currentPage);
   } else {
     alert('タグの一括削除に失敗しました');
   }
@@ -975,7 +975,7 @@ async function bulkAddTag(tagId, _unused) {
 
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
-    await loadBookmarks(q, activeTag);
+    await loadBookmarks(q, activeTag, currentPage);
     await loadTags(); // 新規タグが増えたときフィルターチップを更新します
   } else {
     alert('タグの一括追加に失敗しました');
@@ -998,7 +998,7 @@ async function bulkDelete() {
     selectedIds.clear();
     updateBulkBar();
     const q = document.getElementById('search-input').value.trim();
-    await loadBookmarks(q, activeTag);
+    await loadBookmarks(q, activeTag, currentPage);
   } else {
     alert('一括削除に失敗しました');
   }
@@ -1034,7 +1034,7 @@ async function deleteBookmark(id) {
   if (!res) return; // セッション切れ
   if (res.ok) {
     const q = document.getElementById('search-input').value.trim();
-    loadBookmarks(q, activeTag);
+    loadBookmarks(q, activeTag, currentPage);
   } else {
     alert('削除に失敗しました');
   }
