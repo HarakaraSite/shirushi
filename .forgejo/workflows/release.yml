@@ -1,13 +1,9 @@
-name: Release (latest)
+name: Release
 
 on:
   push:
-    branches:
-      - main
-
-concurrency:
-  group: release
-  cancel-in-progress: false
+    tags:
+      - 'v*'
 
 jobs:
   build-and-release:
@@ -33,16 +29,36 @@ jobs:
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
             go build -ldflags="-s -w" -trimpath -o dist/shirushi-darwin-arm64 .
 
+      # バージョンタグでリリース（タグSHA=ビルドSHAなので不一致は起きない）
+      - name: Upload versioned release
+        uses: actions/forgejo-release@v2
+        with:
+          direction: upload
+          url: ${{ vars.FORGE_URL }}
+          repo: ${{ github.repository }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag: ${{ github.ref_name }}
+          release-dir: dist
+          release-notes: "Release ${{ github.ref_name }}"
+
+      # latestを更新（上書きのため既存リリース・タグを削除）
       - name: Delete existing latest release and tag
         run: |
-          curl -s -X DELETE \
+          RELEASE_ID=$(curl -s \
             -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
-            "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/releases/tags/latest" || true
+            "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/releases/tags/latest" \
+            | jq -r '.id // empty')
+          if [ -n "$RELEASE_ID" ]; then
+            curl -s -X DELETE \
+              -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
+              "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/releases/${RELEASE_ID}"
+          fi
           curl -s -X DELETE \
             -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
             "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/git/refs/tags/latest" || true
+          sleep 2
 
-      - name: Upload release
+      - name: Upload latest release
         uses: actions/forgejo-release@v2
         with:
           direction: upload
@@ -51,5 +67,5 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           tag: latest
           release-dir: dist
-          release-notes: "Latest build from main (${{ github.sha }})"
+          release-notes: "Latest build (${{ github.ref_name }})"
           prerelease: true
