@@ -6,27 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  cleanup-latest:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Delete existing latest release and tag
-        run: |
-          RELEASE_ID=$(curl -s \
-            -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
-            "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/releases/tags/latest" \
-            | jq -r '.id // empty')
-          if [ -n "$RELEASE_ID" ]; then
-            curl -s -X DELETE \
-              -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
-              "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/releases/${RELEASE_ID}"
-          fi
-          curl -s -X DELETE \
-            -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
-            "${{ vars.FORGE_URL }}/api/v1/repos/${{ github.repository }}/git/refs/tags/latest" || true
-          sleep 2
-
   build-and-release:
-    needs: cleanup-latest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,15 +39,3 @@ jobs:
           tag: ${{ github.ref_name }}
           release-dir: dist
           release-notes: "Release ${{ github.ref_name }}"
-
-      - name: Upload latest release
-        uses: actions/forgejo-release@v2
-        with:
-          direction: upload
-          url: ${{ vars.FORGE_URL }}
-          repo: ${{ github.repository }}
-          token: ${{ secrets.RELEASE_TOKEN }}
-          tag: latest
-          release-dir: dist
-          release-notes: "Latest build (${{ github.ref_name }})"
-          prerelease: true
