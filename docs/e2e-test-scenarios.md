@@ -508,6 +508,101 @@ grep -oE 'ADD_DATE="[0-9]+"' "$EXPORT_HTML" | head  # => ADD_DATE が Unix秒の
 
 ---
 
+## シナリオ8: Bearer トークン認証【必須】
+
+Cookie を使わないクライアント（ブラウザ拡張など）が `Authorization: Bearer <token>` で
+APIを利用できることを確認します。Cookie 認証との共存も検証します。
+
+### 前提条件
+
+- アプリを `SHIRUSHI_API_TOKEN` **あり** で起動していること。
+- Cookie 認証は従来通り動くこと（共存確認のため）。
+
+### 起動方法
+
+```bash
+SHIRUSHI_PASSWORD='test-password' SHIRUSHI_API_TOKEN='e2e-bearer-token' ./shirushi
+```
+
+未設定で起動した場合は起動ログに
+「警告: SHIRUSHI_API_TOKEN が設定されていません。Bearer 認証は無効です」と出ます。
+
+### 操作手順
+
+1. 正しい Bearer トークンでブックマーク登録 → 201（認証通過）
+2. Bearer トークンなし → 401
+3. Bearer トークン誤り → 401
+4. `bearer ` 小文字（プレフィックスが厳密不一致）→ 401
+5. Cookie 認証と Bearer 認証の共存確認（どちらかで通る）
+
+### 期待結果
+
+- 正しいトークン: `201`（または URL 重複なら `409`）— いずれも認証は通過している
+- トークンなし: `401`
+- 誤りトークン: `401`
+- 小文字プレフィックス: `401`
+- Cookie 認証: `SHIRUSHI_API_TOKEN` の有無に関わらず従来通り `200` / `201`
+
+### curl 例
+
+```bash
+export BASE_URL="http://localhost:8181"
+export API_TOKEN="e2e-bearer-token"   # 起動時の SHIRUSHI_API_TOKEN と一致させる
+export PASSWORD="test-password"
+
+# --- Bearer 認証 ---
+
+# 1. 正しいトークンで登録（201 or 409）
+curl -s -o /dev/null -w "正しいトークン: %{http_code}\n" \
+  -X POST "$BASE_URL/api/bookmarks" \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/e2e-bearer","title":"Bearer 認証テスト"}'
+# => 201（初回）または 409（URL重複） — どちらも認証は通過
+
+# 2. トークンなし（401）
+curl -s -o /dev/null -w "トークンなし: %{http_code}\n" \
+  -X POST "$BASE_URL/api/bookmarks" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/e2e-bearer-notoken","title":"トークンなし"}'
+# => 401
+
+# 3. 誤ったトークン（401）
+curl -s -o /dev/null -w "誤りトークン: %{http_code}\n" \
+  -X POST "$BASE_URL/api/bookmarks" \
+  -H 'Authorization: Bearer wrong-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/e2e-bearer-wrong","title":"誤りトークン"}'
+# => 401
+
+# 4. 小文字プレフィックス "bearer "（401）
+curl -s -o /dev/null -w "小文字bearer: %{http_code}\n" \
+  -X POST "$BASE_URL/api/bookmarks" \
+  -H "Authorization: bearer $API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/e2e-bearer-lower","title":"小文字bearer"}'
+# => 401
+
+# --- Cookie 認証との共存確認 ---
+
+# 5a. Cookie でログイン→一覧取得（200）— SHIRUSHI_API_TOKEN 有無に関わらず動く
+COOKIE="$(mktemp)"
+curl -s -c "$COOKIE" -X POST "$BASE_URL/api/login" \
+  -H 'Content-Type: application/json' -d "{\"password\":\"$PASSWORD\"}" > /dev/null
+curl -s -o /dev/null -w "Cookie認証(GET): %{http_code}\n" \
+  -b "$COOKIE" "$BASE_URL/api/bookmarks"
+# => 200
+
+# 5b. Cookie でブックマーク登録（201 or 409）
+curl -s -o /dev/null -w "Cookie認証(POST): %{http_code}\n" \
+  -b "$COOKIE" -X POST "$BASE_URL/api/bookmarks" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/e2e-bearer-cookie","title":"Cookie 共存確認"}'
+# => 201 or 409
+```
+
+---
+
 ## 後始末（任意）
 
 シナリオで作成したテストデータを消したい場合、URLや件数を確認のうえ削除します。
