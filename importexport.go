@@ -129,7 +129,8 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	doc := string(content)
 
 	// <DT><A ...> のパターンでブックマークを抽出します。
-	// (?s) は . が改行にもマッチするオプションです。
+	// (?i) は大文字小文字を区別しないオプションです。
+	// [^>]+ や [^<]* は改行を含む任意の文字にマッチするため、(?s) は不要です。
 	reBookmark := regexp.MustCompile(`(?i)<DT><A\s([^>]+)>([^<]*)</A>`)
 	reHref := regexp.MustCompile(`(?i)HREF="([^"]+)"`)
 	reAddDate := regexp.MustCompile(`(?i)ADD_DATE="([^"]+)"`)

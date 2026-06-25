@@ -76,13 +76,18 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 
 	// キーワード条件
 	if q != "" {
-		like := "%" + q + "%"
+		// SQLのLIKEでは % と _ がワイルドカードとして機能します。
+		// ユーザーが "100%" や "file_name" と検索したとき、意図しない部分一致になるのを防ぐため
+		// これらの文字をエスケープしてから % で囲みます。
+		escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(q)
+		like := "%" + escaped + "%"
 
 		// 日付パターン検出：
 		//   6桁の数字 "202507" → created_at LIKE "2025-07%"（7月全体）
 		//   4桁の数字 "2025"   → created_at LIKE "2025%"  （2025年全体）
 		// strftime は保存フォーマットによって動作しないことがあるため、
 		// 文字列の先頭を直接 LIKE で比較する方式にしています。
+		// dateLike は純粋な数字から生成するためエスケープ不要です。
 		dateLike := ""
 		if _, err := strconv.Atoi(q); err == nil {
 			switch len(q) {
@@ -93,13 +98,14 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// ESCAPE '\' を指定することで、\% や \_ をリテラルとして扱います。
 		if dateLike != "" {
 			conditions = append(conditions,
-				"(b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ? OR b.created_at LIKE ?)")
+				`(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.excerpt LIKE ? ESCAPE '\' OR b.created_at LIKE ?)`)
 			args = append(args, like, like, like, dateLike)
 		} else {
 			conditions = append(conditions,
-				"(b.title LIKE ? OR b.url LIKE ? OR b.excerpt LIKE ?)")
+				`(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.excerpt LIKE ? ESCAPE '\')`)
 			args = append(args, like, like, like)
 		}
 	}
