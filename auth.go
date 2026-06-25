@@ -193,7 +193,7 @@ func getClientIP(r *http.Request) string {
 	}
 
 	if isTrustedProxyIP(remoteIP) {
-		if ip := firstForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
+		if ip := lastForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
 			return ip
 		}
 		if ip := validHeaderIP(r.Header.Get("X-Real-IP")); ip != "" {
@@ -215,11 +215,15 @@ func isTrustedProxyIP(ip net.IP) bool {
 	return ip.IsLoopback()
 }
 
-// firstForwardedIP：X-Forwarded-For の先頭IPを取り出します。
-// X-Forwarded-For は「元のクライアント, プロキシ1, プロキシ2」のようにカンマ区切りです。
-func firstForwardedIP(header string) string {
-	for _, part := range strings.Split(header, ",") {
-		if ip := validHeaderIP(part); ip != "" {
+// lastForwardedIP：X-Forwarded-For の末尾IPを取り出します。
+// X-Forwarded-For は「元のクライアント, プロキシ1, プロキシ2」のようにカンマ区切りで、
+// プロキシは自分が受け取ったIPを末尾に追記します。
+// 先頭はクライアントが自由に偽装できますが、末尾は直前の信頼できるプロキシ（Caddy）が
+// 付加したIPなので、レートリミット用途では末尾を使うのが安全です。
+func lastForwardedIP(header string) string {
+	parts := strings.Split(header, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if ip := validHeaderIP(parts[i]); ip != "" {
 			return ip
 		}
 	}
@@ -236,6 +240,8 @@ func validHeaderIP(value string) string {
 }
 
 // isLoginLocked：対象IPがロック中か確認します。
+// 判定のみを行い、マップの変更（副作用）は行いません。
+// 期限切れレコードの削除は recordLoginFailure に一元化しています。
 func isLoginLocked(clientIP string) bool {
 	now := nowFunc()
 
@@ -246,16 +252,13 @@ func isLoginLocked(clientIP string) bool {
 	if !ok {
 		return false
 	}
-	if attempt.LockedUntil.After(now) {
-		return true
-	}
-	if !attempt.LockedUntil.IsZero() || now.Sub(attempt.FirstFailure) > loginFailureWindow {
-		delete(loginAttempts, clientIP)
-	}
-	return false
+	return attempt.LockedUntil.After(now)
 }
 
 // recordLoginFailure：ログイン失敗を記録し、上限到達時はロック状態にします。
+// 期限切れレコードのリセットもここで一元管理します。
+// isLoginLocked でロックと判定された場合はこの関数は呼ばれないため、
+// LockedUntil が設定されているレコードに到達するのは「ロック期間が切れた直後」です。
 func recordLoginFailure(clientIP string) bool {
 	now := nowFunc()
 
@@ -263,9 +266,16 @@ func recordLoginFailure(clientIP string) bool {
 	defer loginAttemptsMu.Unlock()
 
 	attempt := loginAttempts[clientIP]
-	if attempt.FirstFailure.IsZero() || now.Sub(attempt.FirstFailure) > loginFailureWindow {
+
+	// 次の2条件のいずれかでカウントをリセットします:
+	//   1. ロック期間が切れた（LockedUntil が過去になった）
+	//   2. 失敗ウィンドウが切れた（FirstFailure から loginFailureWindow 以上経過した）
+	lockedButExpired := !attempt.LockedUntil.IsZero() && !attempt.LockedUntil.After(now)
+	windowExpired := !attempt.FirstFailure.IsZero() && now.Sub(attempt.FirstFailure) > loginFailureWindow
+	if lockedButExpired || windowExpired || attempt.FirstFailure.IsZero() {
 		attempt = loginAttempt{FirstFailure: now}
 	}
+
 	attempt.Failures++
 	if attempt.Failures >= maxLoginFailures {
 		attempt.LockedUntil = now.Add(loginLockoutDuration)

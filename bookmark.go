@@ -212,7 +212,14 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// nil スライスをそのままJSONにすると null になるため、空スライスで初期化します。
+	// 各ブックマークの Tags フィールドが nil（タグ0件）の場合も
+	// JSON で null ではなく [] を返すために初期化します。
+	// bookmarks スライス自体の nil ガードもあわせて行います。
+	for i := range bookmarks {
+		if bookmarks[i].Tags == nil {
+			bookmarks[i].Tags = []Tag{}
+		}
+	}
 	if bookmarks == nil {
 		bookmarks = []Bookmark{}
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"           // エクスポートHTML生成（fmt.Fprintln, fmt.Fprintf）に使うパッケージ
 	"html"          // HTML特殊文字のエスケープ・アンエスケープに使うパッケージ
 	"io"            // ファイル本文の読み取りに使うパッケージ
+	"log"           // サムネイル保存エラーのログ出力に使うパッケージ
 	"net/http"      // HTTPハンドラ・エラーレスポンスに使うパッケージ
 	"regexp"        // インポートHTMLからブックマークを抽出する正規表現パッケージ
 	"strconv"       // ADD_DATE（Unixタイムスタンプ）を整数に変換するパッケージ
@@ -294,10 +295,12 @@ func batchFetchThumbnails(ids []int64) {
 			continue
 		}
 
-		db.Exec(
+		if _, err := db.Exec(
 			`UPDATE bookmarks SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')`,
 			meta.ImageURL, id,
-		)
+		); err != nil {
+			log.Printf("サムネイル保存エラー (id=%d): %v", id, err)
+		}
 
 		// 外部サーバーへの連続アクセスを避けるためのウェイトです。
 		time.Sleep(500 * time.Millisecond)

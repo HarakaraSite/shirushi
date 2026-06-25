@@ -66,7 +66,11 @@ func runMigrations() {
 		var cid, notNull, pk int
 		var name, colType string
 		var dfltValue sql.NullString
-		rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			// Scan 失敗はカラム一覧が不完全になり、既存カラムを「無い」と誤判定して
+			// 二重 ALTER TABLE が走る可能性があるため、ここで止めます。
+			log.Fatal("カラム情報の読み取りエラー:", err)
+		}
 		columns[name] = true
 	}
 
@@ -153,7 +157,11 @@ func hasUniqueURLIndex() bool {
 		var seq, unique int
 		var name, origin string
 		var partial int
-		rows.Scan(&seq, &name, &unique, &origin, &partial)
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			// Scan 失敗は false を返して安全側に倒します（後続でマイグレーションが走る）。
+			rows.Close()
+			return false
+		}
 		if unique == 1 {
 			uniqueIndexNames = append(uniqueIndexNames, name)
 		}
@@ -169,7 +177,10 @@ func hasUniqueURLIndex() bool {
 		for infoRows.Next() {
 			var rank, cid int
 			var colName string
-			infoRows.Scan(&rank, &cid, &colName)
+			if err := infoRows.Scan(&rank, &cid, &colName); err != nil {
+				infoRows.Close()
+				return false
+			}
 			if colName == "url" {
 				infoRows.Close()
 				return true

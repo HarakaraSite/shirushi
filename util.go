@@ -40,14 +40,22 @@ func checkAllExist(table string, ids []int) error {
 		args[i] = id
 	}
 	var found int
+	// COUNT(DISTINCT id) にすることで、ids に重複が含まれていても
+	// 「実際に存在する一意のID数」と比較できます。
+	// COUNT(*) だと ids=[1,1] のとき found=1、len(ids)=2 で誤った404になります。
 	err := db.QueryRow(
-		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id IN (%s)", table, placeholders),
+		fmt.Sprintf("SELECT COUNT(DISTINCT id) FROM %s WHERE id IN (%s)", table, placeholders),
 		args...,
 	).Scan(&found)
 	if err != nil {
 		return fmt.Errorf("%s の確認エラー: %w", table, err)
 	}
-	if found != len(ids) {
+	// idsの一意な値の数と比較します。
+	unique := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		unique[id] = struct{}{}
+	}
+	if found != len(unique) {
 		return fmt.Errorf("指定された %s の一部が見つかりません", table)
 	}
 	return nil
@@ -79,13 +87,28 @@ func validateHTTPURL(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// url.Parse はスキームを自動で小文字化します（HTTP→http）。
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", errors.New("URLは http または https で始まる必要があります")
 	}
 	if u.Host == "" {
 		return "", errors.New("URLにはホスト名が必要です")
 	}
-	return trimmed, nil
+
+	// ホスト名を小文字に正規化します。
+	// ドメイン名は大文字小文字を区別しないため（RFC 4343）、
+	// http://Example.com と http://example.com を同一URLとして扱えます。
+	// u.Host には "example.com:8080" のようにポートが含まれる場合もありますが、
+	// ポート番号は数字なので strings.ToLower しても影響ありません。
+	u.Host = strings.ToLower(u.Host)
+
+	// デフォルトポートを除去します。
+	// http://example.com:80/ と http://example.com/ は同じURLなので統一します。
+	if (u.Scheme == "http" && u.Port() == "80") || (u.Scheme == "https" && u.Port() == "443") {
+		u.Host = u.Hostname() // ポートなしのホスト名のみにします。
+	}
+
+	return u.String(), nil
 }
 
 // decodeJSONBody：JSONリクエスト本文をサイズ制限付きで読み取ります。
