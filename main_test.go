@@ -935,10 +935,15 @@ func TestHandleLogin_AllowsAfterLockoutExpires(t *testing.T) {
 }
 
 // TestGetClientIP_UsesForwardedHeaderFromLocalProxy：ローカルプロキシ経由では転送元IPを使うかテストします。
+// Caddy は X-Forwarded-For に実際の接続元IPを末尾に追記するため、末尾を採用します。
+// シナリオ: 攻撃者(203.0.113.30)が X-Forwarded-For: 10.0.0.1 を偽装して送信 →
+//           Caddy が本物の接続元 203.0.113.30 を末尾に追記 →
+//           Shirushi は末尾を採用して攻撃者の本物IPを取得します。
 func TestGetClientIP_UsesForwardedHeaderFromLocalProxy(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/login", nil)
 	r.RemoteAddr = "127.0.0.1:12345"
-	r.Header.Set("X-Forwarded-For", "203.0.113.30, 10.0.0.1")
+	// 先頭が攻撃者による偽装IP、末尾がCaddyの付加した本物IP
+	r.Header.Set("X-Forwarded-For", "10.0.0.1, 203.0.113.30")
 
 	if got := getClientIP(r); got != "203.0.113.30" {
 		t.Fatalf("クライアントIPが違います: got %q, want %q", got, "203.0.113.30")
