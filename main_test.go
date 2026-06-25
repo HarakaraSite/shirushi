@@ -1087,9 +1087,9 @@ func TestMigrateAddUniqueURL_PreservesBookmarkTags(t *testing.T) {
 		t.Fatalf("タグ紐付けエラー: %v", err)
 	}
 
-	migrateAddUniqueURL()
+	migrateAddUniqueURLOn(db)
 
-	if !hasUniqueURLIndex() {
+	if !hasUniqueURLIndexOn(db) {
 		t.Fatal("url カラムに UNIQUE 制約が追加されていません")
 	}
 	if got := countBookmarkTags(t); got != 1 {
@@ -1140,7 +1140,7 @@ func TestCleanupOrphanedBookmarkTags(t *testing.T) {
 		t.Fatalf("外部キー制約ONエラー: %v", err)
 	}
 
-	cleanupOrphanedBookmarkTags()
+	cleanupOrphanedBookmarkTagsOn(db)
 
 	if got := countBookmarkTags(t); got != 1 {
 		t.Fatalf("クリーンアップ後のタグ紐付け件数が違います: got %d, want 1", got)

@@ -2,6 +2,7 @@ package main
 
 // db.go：データベースの初期化・テーブル作成・マイグレーションを担当するファイルです。
 // アプリ起動時に main() から呼ばれる createTable() と runMigrations() が中心です。
+// スキーマの定義は schema.go の currentSchema が唯一の真実です。
 
 import (
 	"database/sql" // sql.NullString を使うためのパッケージ
@@ -9,52 +10,29 @@ import (
 	"log"          // 致命的なエラー時に終了するためのパッケージ
 )
 
-// createTable：新規インストール時に必要なテーブルをすべて作成する関数です。
-// Shioriと同等のスキーマ構成になっています。
+// createTable：新規インストール時に currentSchema を使ってテーブルを作成します。
+// スキーマの定義は schema.go の currentSchema が唯一の真実です。
 func createTable() {
-	queries := []string{
-		// ブックマークテーブル
-		`CREATE TABLE IF NOT EXISTS bookmarks (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            url         TEXT NOT NULL,
-            title       TEXT NOT NULL DEFAULT '',
-            excerpt     TEXT NOT NULL DEFAULT '',
-            author      TEXT NOT NULL DEFAULT '',
-            public      INTEGER NOT NULL DEFAULT 0,
-            has_content BOOLEAN NOT NULL DEFAULT FALSE,
-            image_url   TEXT NOT NULL DEFAULT '',
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            modified_at DATETIME DEFAULT NULL
-        );`,
-		// タグテーブル
-		// ブックマークに付けるラベル（例: "go", "tech", "あとで読む"）を管理します。
-		`CREATE TABLE IF NOT EXISTS tags (
-            id   INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-        );`,
-		// ブックマークとタグの中間テーブル（多対多の関係）
-		// 1つのブックマークに複数のタグ、1つのタグを複数のブックマークに付けられます。
-		`CREATE TABLE IF NOT EXISTS bookmark_tags (
-            bookmark_id INTEGER NOT NULL,
-            tag_id      INTEGER NOT NULL,
-            PRIMARY KEY (bookmark_id, tag_id),
-            FOREIGN KEY (bookmark_id) REFERENCES bookmarks(id) ON DELETE CASCADE,
-            FOREIGN KEY (tag_id)      REFERENCES tags(id)      ON DELETE CASCADE
-        );`,
-	}
-	for _, query := range queries {
+	for _, query := range currentSchema {
 		if _, err := db.Exec(query); err != nil {
 			log.Fatal("テーブル作成エラー:", err)
 		}
 	}
 }
 
-// runMigrations：既存のデータベースに新しいカラムを追加するマイグレーション関数です。
+// runMigrations：グローバル DB に対してマイグレーションを実行します。
+// 実処理は runMigrationsOn に委譲しているため、テストでも同じロジックを使えます。
+func runMigrations() {
+	runMigrationsOn(db)
+}
+
+// runMigrationsOn：既存のデータベースに新しいカラムを追加するマイグレーション関数です。
 // PRAGMA table_info で現在のカラム一覧を取得し、不足しているカラムだけを追加します。
 // この方式は「冪等性（何度実行しても同じ結果になる）」があるため安全です。
-func runMigrations() {
+// d を引数に取ることでテスト用インメモリ DB でも実行できます。
+func runMigrationsOn(d *sql.DB) {
 	// PRAGMA table_info はSQLiteの特殊コマンドで、テーブルのカラム情報を返します。
-	rows, err := db.Query("PRAGMA table_info(bookmarks)")
+	rows, err := d.Query("PRAGMA table_info(bookmarks)")
 	if err != nil {
 		log.Fatal("マイグレーション確認エラー:", err)
 	}
@@ -77,7 +55,7 @@ func runMigrations() {
 	// description カラムが存在する場合は excerpt にリネームします。
 	// （旧スキーマからの移行処理）
 	if columns["description"] && !columns["excerpt"] {
-		_, err = db.Exec("ALTER TABLE bookmarks RENAME COLUMN description TO excerpt")
+		_, err = d.Exec("ALTER TABLE bookmarks RENAME COLUMN description TO excerpt")
 		if err != nil {
 			log.Fatal("カラムリネームエラー:", err)
 		}
@@ -103,7 +81,7 @@ func runMigrations() {
 
 	for _, m := range migrations {
 		if !columns[m.column] {
-			if _, err := db.Exec(m.sql); err != nil {
+			if _, err := d.Exec(m.sql); err != nil {
 				log.Fatal("マイグレーションエラー:", err)
 			}
 			fmt.Printf("マイグレーション: %s カラムを追加しました\n", m.column)
@@ -116,35 +94,35 @@ func runMigrations() {
 		`CREATE TABLE IF NOT EXISTS tags (
             id   INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE
-        );`,
+        )`,
 		`CREATE TABLE IF NOT EXISTS bookmark_tags (
             bookmark_id INTEGER NOT NULL,
             tag_id      INTEGER NOT NULL,
             PRIMARY KEY (bookmark_id, tag_id),
             FOREIGN KEY (bookmark_id) REFERENCES bookmarks(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id)      REFERENCES tags(id)      ON DELETE CASCADE
-        );`,
+        )`,
 	}
 	for _, q := range tagMigrations {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := d.Exec(q); err != nil {
 			log.Fatal("タグテーブル作成エラー:", err)
 		}
 	}
-	cleanupOrphanedBookmarkTags()
+	cleanupOrphanedBookmarkTagsOn(d)
 
 	// url カラムに UNIQUE 制約が付いているか確認します。
 	// PRAGMA index_list でテーブルのインデックス一覧を取得できます。
-	if !hasUniqueURLIndex() {
+	if !hasUniqueURLIndexOn(d) {
 		fmt.Println("マイグレーション: url カラムに UNIQUE 制約を追加します")
-		migrateAddUniqueURL()
+		migrateAddUniqueURLOn(d)
 		fmt.Println("マイグレーション: UNIQUE 制約を追加しました")
 	}
 }
 
-// hasUniqueURLIndex：bookmarks テーブルの url カラムに UNIQUE インデックスがあるか確認します。
-func hasUniqueURLIndex() bool {
+// hasUniqueURLIndexOn：bookmarks テーブルの url カラムに UNIQUE インデックスがあるか確認します。
+func hasUniqueURLIndexOn(d *sql.DB) bool {
 	// PRAGMA index_list はテーブルのインデックス一覧を返します。
-	rows, err := db.Query("PRAGMA index_list(bookmarks)")
+	rows, err := d.Query("PRAGMA index_list(bookmarks)")
 	if err != nil {
 		return false
 	}
@@ -170,7 +148,7 @@ func hasUniqueURLIndex() bool {
 
 	for _, name := range uniqueIndexNames {
 		// そのインデックスが url カラムに対応するか確認します。
-		infoRows, err := db.Query("PRAGMA index_info(" + name + ")")
+		infoRows, err := d.Query("PRAGMA index_info(" + name + ")")
 		if err != nil {
 			continue
 		}
@@ -191,11 +169,11 @@ func hasUniqueURLIndex() bool {
 	return false
 }
 
-// cleanupOrphanedBookmarkTags：存在しないブックマークやタグを指す古い紐付けを削除します。
+// cleanupOrphanedBookmarkTagsOn：存在しないブックマークやタグを指す古い紐付けを削除します。
 // 過去に外部キー制約が無効な状態で削除されたデータがあると、bookmark_tags だけが残ることがあります。
 // 本体の bookmarks / tags は消さず、「親が存在しない中間テーブルの行」だけを掃除します。
-func cleanupOrphanedBookmarkTags() {
-	result, err := db.Exec(`
+func cleanupOrphanedBookmarkTagsOn(d *sql.DB) {
+	result, err := d.Exec(`
 		DELETE FROM bookmark_tags
 		WHERE NOT EXISTS (
 			SELECT 1 FROM bookmarks b WHERE b.id = bookmark_tags.bookmark_id
@@ -214,12 +192,12 @@ func cleanupOrphanedBookmarkTags() {
 	}
 }
 
-// migrateAddUniqueURL：既存データを保持しながら url カラムに UNIQUE 制約を追加します。
+// migrateAddUniqueURLOn：既存データを保持しながら url カラムに UNIQUE 制約を追加します。
 // SQLite では既存カラムへの制約追加ができないため、テーブルを再作成します。
 // 手順: 新テーブル作成 → データコピー → 旧テーブル削除 → リネーム
-func migrateAddUniqueURL() {
+func migrateAddUniqueURLOn(d *sql.DB) {
 	// トランザクション内で行うことでエラー時にロールバックできます。
-	tx, err := db.Begin()
+	tx, err := d.Begin()
 	if err != nil {
 		log.Fatal("トランザクション開始エラー:", err)
 	}
