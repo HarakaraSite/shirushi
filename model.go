@@ -57,6 +57,10 @@ type Metadata struct {
 // データベースの接続を保持するグローバル変数です。
 var db *sql.DB
 
+// apiToken：起動時に SHIRUSHI_API_TOKEN から読み込んだ Bearer トークンです。
+// 空文字の場合は Bearer 認証が無効（Cookie のみで動作）です。
+var apiToken string
+
 // sessions：ログイン中のセッショントークンと有効期限を管理するマップです。
 // 複数のリクエストが同時にアクセスしても安全なよう sync.Mutex で保護します。
 var (

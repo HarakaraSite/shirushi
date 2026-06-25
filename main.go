@@ -58,11 +58,19 @@ func main() {
 		log.Fatal("SHIRUSHI_PASSWORD が設定されていません。環境変数にパスワードを指定してから起動してください。\n例: SHIRUSHI_PASSWORD='yourpassword' ./shirushi")
 	}
 
-	// 3. テーブルが存在しない場合は作成します。
+	// 3. Bearer トークンを起動時に1回だけ読んでグローバル変数に保持します。
+	// リクエストごとに os.Getenv を呼ぶのと違い、「未設定なら Bearer 無効」という
+	// フラグ的な役割も起動時1回の読み込みで自然に表現できます。
+	apiToken = os.Getenv("SHIRUSHI_API_TOKEN")
+	if apiToken == "" {
+		log.Println("警告: SHIRUSHI_API_TOKEN が設定されていません。Bearer 認証は無効です（Cookie 認証のみで動作します）。")
+	}
+
+	// 4. テーブルが存在しない場合は作成します。
 	createTable()
-	// 3. 既存DBに新しいカラムを追加するマイグレーションを実行します。
+	// 4. 既存DBに新しいカラムを追加するマイグレーションを実行します。
 	runMigrations()
-	// 4. APIのルート（住所）と、それぞれの処理（関数）を紐付けます。
+	// 5. APIのルート（住所）と、それぞれの処理（関数）を紐付けます。
 	// Go 1.22からの新機能で、"GET /..." のようにHTTPメソッドを指定できます。
 
 	// 認証API（ミドルウェアの対象外）

@@ -49,33 +49,47 @@ func authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// --- セッション Cookie チェック（Web UI 用） ---
 		// Cookieからセッショントークンを取り出します。
 		cookie, err := r.Cookie("session")
-		if err != nil {
-			// Cookieがない場合は401 Unauthorizedを返します。
-			http.Error(w, "認証が必要です", http.StatusUnauthorized)
-			return
+		if err == nil {
+			// トークンが有効かどうかを確認します。
+			sessionsMu.Lock()
+			expiry, ok := sessions[cookie.Value]
+			expired := ok && time.Now().After(expiry)
+			if expired {
+				// 期限切れのトークンは見つけた時点でマップから削除します。
+				// 放置するとメモリに溜まり続けるためです。
+				delete(sessions, cookie.Value)
+			}
+			sessionsMu.Unlock()
+
+			if ok && !expired {
+				// Cookie 認証OK：次のハンドラに処理を渡します。
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
-		// トークンが有効かどうかを確認します。
-		sessionsMu.Lock()
-		expiry, ok := sessions[cookie.Value]
-		expired := ok && time.Now().After(expiry)
-		if expired {
-			// 期限切れのトークンは見つけた時点でマップから削除します。
-			// 放置するとメモリに溜まり続けるためです。
-			delete(sessions, cookie.Value)
+		// --- Bearer トークンチェック（ブラウザ拡張用） ---
+		// SHIRUSHI_API_TOKEN が設定されている場合のみ Bearer 認証を試みます。
+		// Authorization ヘッダから "Bearer " プレフィックスを除いたトークンを取り出します。
+		// strings.CutPrefix は第2引数のプレフィックスが存在する場合だけ true を返します。
+		// プレフィックスは大文字小文字を厳密に区別します（"bearer " は不一致）。
+		if apiToken != "" {
+			if rawToken, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+				// タイミング攻撃を防ぐために定数時間比較を使います（1 = 一致）。
+				// []byte 変換が必要なのは ConstantTimeCompare がバイトスライスを引数に取るためです。
+				if subtle.ConstantTimeCompare([]byte(rawToken), []byte(apiToken)) == 1 {
+					// Bearer 認証OK：次のハンドラに処理を渡します。
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 		}
-		sessionsMu.Unlock()
 
-		if !ok || expired {
-			// トークンが存在しない、または期限切れの場合は401を返します。
-			http.Error(w, "セッションが無効です", http.StatusUnauthorized)
-			return
-		}
-
-		// 認証OK：次のハンドラに処理を渡します。
-		next.ServeHTTP(w, r)
+		// Cookie も Bearer も通過しなかった場合は 401 を返します。
+		http.Error(w, "認証が必要です", http.StatusUnauthorized)
 	})
 }
 
