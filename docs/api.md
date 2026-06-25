@@ -3,12 +3,32 @@
 ベース URL: `http://localhost:8181`（`SHIRUSHI_ADDR` で変更可）
 
 すべての API は JSON を返します（`Content-Type: application/json`）。
-`/api/login` と `/api/logout` 以外は Cookie セッションによる認証が必要です。
+`/api/login` と `/api/logout` 以外は認証が必要です。
 未認証リクエストには `401 Unauthorized` を返します。
+
+### 認証方式
+
+| 方式 | 用途 | 設定 |
+|------|------|------|
+| セッション Cookie | Web UI | `POST /api/login` でログイン |
+| Bearer トークン | ブラウザ拡張など Cookie を使えないクライアント | 環境変数 `SHIRUSHI_API_TOKEN` を設定して起動 |
+
+どちらか一方が有効であればリクエストは通過します。
+
+**Bearer トークンの使い方**
+
+```
+Authorization: Bearer <SHIRUSHI_API_TOKEN の値>
+```
+
+- `SHIRUSHI_API_TOKEN` が未設定の場合、Bearer 認証は無効（Cookie のみ有効）
+- 起動時に `"SHIRUSHI_API_TOKEN が設定されていません"` という警告ログが出る
+- トークンは `openssl rand -hex 32` で生成した 256bit 文字列を推奨
+- `Bearer ` プレフィックスは大文字小文字を厳密に区別（`bearer ` は不一致）
 
 ---
 
-## 認証
+## 認証 API
 
 ### ログイン
 
@@ -504,7 +524,7 @@ curl -b 'session=<token>' \
 ```
 
 `skipped` は重複 URL でスキップされた件数です。
-インポート時のサムネイル（OG 画像）は取得されません。
+インポート後、新規登録されたブックマークのサムネイル（OG 画像）をバックグラウンドで順次取得します（レスポンス返却後に非同期で実行）。
 
 ---
 
@@ -522,7 +542,7 @@ curl -b 'session=<token>' \
 | ステータス | 内容 |
 |-----------|------|
 | `400 Bad Request` | リクエスト形式の誤り・必須フィールド欠如・バリデーション失敗 |
-| `401 Unauthorized` | セッション Cookie がない・期限切れ |
+| `401 Unauthorized` | セッション Cookie がない・期限切れ、または Bearer トークンが不正 |
 | `404 Not Found` | 指定した ID が存在しない |
 | `409 Conflict` | URL の重複 |
 | `429 Too Many Requests` | ログイン失敗によるロック |
