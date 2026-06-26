@@ -141,7 +141,15 @@ func fetchMetadata(url string) (*Metadata, error) {
 	meta.Title = firstNonEmpty(extractOGTag(html, "og:title"), extractTitle(html))
 	meta.Excerpt = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
 	meta.Author = firstNonEmpty(extractOGTag(html, "og:author"), extractMetaTag(html, "author"))
-	meta.ImageURL = extractOGTag(html, "og:image")
+	// og:image は相対URLで返すサイトがあるため、リクエスト先URLを基準に絶対URL化します。
+	// 例: "/og.png" → "https://example.com/og.png"
+	// http/https 以外（data: URI 等）は保存しません。
+	if raw := extractOGTag(html, "og:image"); raw != "" {
+		if abs, err := resp.Request.URL.Parse(raw); err == nil &&
+			(abs.Scheme == "http" || abs.Scheme == "https") {
+			meta.ImageURL = abs.String()
+		}
+	}
 
 	return meta, nil
 }

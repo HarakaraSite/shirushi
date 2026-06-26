@@ -266,6 +266,8 @@ func handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
+	// 前後の空白を除去します。コピペや拡張経由の入力で混入しやすいためです。
+	t.Name = strings.TrimSpace(t.Name)
 	if t.Name == "" {
 		http.Error(w, "タグ名は必須です", http.StatusBadRequest)
 		return
@@ -301,6 +303,8 @@ func handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
 		return
 	}
+	// 前後の空白を除去します。
+	t.Name = strings.TrimSpace(t.Name)
 	if t.Name == "" {
 		http.Error(w, "タグ名は必須です", http.StatusBadRequest)
 		return
