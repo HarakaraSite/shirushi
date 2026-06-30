@@ -79,7 +79,7 @@ h1 {
   margin-bottom: 24px;
 }
 
-input, textarea {
+input:not([type="checkbox"]):not([type="radio"]), textarea {
   padding: 8px;
   border: 1px solid var(--s-border-hover);
   border-radius: 4px;
@@ -89,8 +89,8 @@ input, textarea {
   color: var(--s-text);
 }
 
-/* ログイン画面 */
-#login-screen input {
+/* ログイン画面（チェックボックスは除外してPicoのスタイルを維持します） */
+#login-screen input:not([type="checkbox"]):not([type="radio"]) {
   background: var(--pico-form-element-background-color) !important;
   color: var(--s-text) !important;
   border: 1px solid var(--s-border-hover) !important;
