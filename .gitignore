@@ -17,6 +17,9 @@ _refs/shiori/
 # テスト出力（go test -coverprofile で生成）
 coverage.out
 
+# Claude Code のローカル起動設定（パスワード等を含むため除外）
+.claude/launch.json
+
 # Playwright スナップショット・スクリーンショット（一時ファイル）
 .playwright-cli/
 *.png
