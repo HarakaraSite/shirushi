@@ -26,6 +26,10 @@
     <form id="login-form" style="background:#fff; padding:16px; border-radius:8px; display:flex; flex-direction:column; gap:8px;">
       <input type="text" name="username" value="shirushi" autocomplete="username" hidden>
       <input type="password" id="input-password" placeholder="パスワード" autocomplete="current-password" required>
+      <label style="display:flex; align-items:center; gap:6px; font-size:0.875rem; cursor:pointer;">
+        <input type="checkbox" id="input-remember-me">
+        ログイン状態を維持する
+      </label>
       <button type="submit">ログイン</button>
       <p id="login-error" style="color:#e00; font-size:0.875rem; display:none;">パスワードが違います</p>
     </form>
