@@ -98,7 +98,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     showMainScreen();
   } else {
     const loginError = document.getElementById('login-error');
-    loginError.textContent = 'パスワードが違います';
+    if (res.status === 429) {
+      loginError.textContent = await res.text();
+    } else {
+      loginError.textContent = 'パスワードが違います';
+    }
     loginError.style.display = 'block';
   }
 });

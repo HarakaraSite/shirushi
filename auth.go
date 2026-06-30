@@ -56,7 +56,7 @@ func authMiddleware(next http.Handler) http.Handler {
 			// トークンが有効かどうかを確認します。
 			sessionsMu.Lock()
 			expiry, ok := sessions[cookie.Value]
-			expired := ok && time.Now().After(expiry)
+			expired := ok && nowFunc().After(expiry)
 			if expired {
 				// 期限切れのトークンは見つけた時点でマップから削除します。
 				// 放置するとメモリに溜まり続けるためです。
