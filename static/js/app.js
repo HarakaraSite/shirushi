@@ -86,10 +86,11 @@ async function showMainScreen(preloadedRes = null) {
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const password = document.getElementById('input-password').value;
+  const rememberMe = document.getElementById('input-remember-me').checked;
   const res = await fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, rememberMe }),
   });
   if (res.ok) {
     document.getElementById('input-password').value = '';

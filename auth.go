@@ -96,7 +96,8 @@ func authMiddleware(next http.Handler) http.Handler {
 // handleLogin：パスワードを受け取り、正しければセッショントークンを発行するAPIです。
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		RememberMe bool   `json:"rememberMe"` // true のとき30日間セッションを維持します。
 	}
 	if err := decodeJSONBody(w, r, &body); err != nil {
 		http.Error(w, "リクエスト解析エラー", http.StatusBadRequest)
@@ -138,9 +139,24 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := hex.EncodeToString(tokenBytes) // バイト列を16進数文字列に変換します。
 
-	// セッションを保存します（有効期限は24時間）。
+	// rememberMe の有無でセッション有効期限とCookieの寿命を切り替えます。
+	// rememberMe=true : 30日間（ブラウザを閉じても維持）
+	// rememberMe=false: ブラウザを閉じると消えるセッションCookie（MaxAge=0 で指定しない）
+	var sessionTTL time.Duration
+	cookieMaxAge := 0 // 0 = MaxAge 属性を付けない → ブラウザセッション中のみ有効
+	if body.RememberMe {
+		sessionTTL = 30 * 24 * time.Hour
+		cookieMaxAge = int(sessionTTL.Seconds()) // 30日（秒）
+	} else {
+		// サーバー側セッションは24時間で失効させます。
+		// Cookieはブラウザが管理しますが、サーバー側に期限を設けることで
+		// 長時間放置されたセッションをクリーンアップできます。
+		sessionTTL = 24 * time.Hour
+	}
+
+	// セッションを保存します。
 	sessionsMu.Lock()
-	sessions[token] = nowFunc().Add(24 * time.Hour)
+	sessions[token] = nowFunc().Add(sessionTTL)
 	sessionsMu.Unlock()
 
 	// Cookieにトークンをセットします。
@@ -153,7 +169,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   secureSessionCookie(),
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400, // 24時間（秒）
+		MaxAge:   cookieMaxAge,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
