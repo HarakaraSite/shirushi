@@ -260,7 +260,10 @@ async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) 
 
   if (bookmarks.length === 0) {
     list.innerHTML = '<p>ブックマークはまだありません。</p>';
-    document.getElementById('pagination').innerHTML = '';
+    // 上下両方のページネーションを空にします。
+    document.querySelectorAll('.pagination-container').forEach(el => {
+      el.innerHTML = '';
+    });
     // 表示が0件になったら選択もすべて解除します。
     selectedIds.clear();
     updateBulkBar();
@@ -464,12 +467,14 @@ function getPageNumbers(current, total) {
 // ページネーションUIを描画します。
 // total（総件数）と currentPage から表示内容を決めます。
 function renderPagination(total, page) {
-  const el = document.getElementById('pagination');
+  const containers = document.querySelectorAll('.pagination-container');
   const totalPages = Math.ceil(total / pageSize);
 
   // 1ページに収まる場合は表示しません。
   if (totalPages <= 1) {
-    el.innerHTML = '';
+    containers.forEach(el => {
+      el.innerHTML = '';
+    });
     return;
   }
 
@@ -494,7 +499,10 @@ function renderPagination(total, page) {
   html += `<button ${page >= totalPages ? 'disabled' : `onclick="goToPage(${page + 1})"`}>次へ →</button>`;
   html += '</div>';
 
-  el.innerHTML = html;
+  // 同じページ操作を一覧の上部と下部へ描画します。
+  containers.forEach(el => {
+    el.innerHTML = html;
+  });
 }
 
 // safeHref：リンクにして安全なURLだけをそのまま返します。

@@ -17,9 +17,11 @@ Caddy 経由で外出先からも使えます。
 - OGP メタデータ（タイトル・説明・サムネイル）の自動取得
 - タグの作成・編集・削除、ブックマークへの紐付け
 - キーワード検索・タグフィルター・日付検索（`202507` で2025年7月など）
+- 1ページの表示件数切り替え（50・100・200件）と一覧上下のページネーション
 - チェックボックスで複数選択 → バルクタグ追加・削除・一括削除
 - Netscape Bookmark 形式（Chrome/Firefox のエクスポート形式）でインポート・エクスポート
-- パスワード認証（シングルユーザー）
+- パスワード認証（シングルユーザー、30日間のログイン維持に対応）
+- Bearer トークン認証（ブラウザ拡張などのAPIクライアント向け）
 - ダークテーマ固定
 
 ---
@@ -38,7 +40,7 @@ go build -o shirushi .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o shirushi .
 ```
 
-Go 1.22 以上が必要です。依存ライブラリは `modernc.org/sqlite`（CGO 不要の純粋 Go 実装）のみです。
+Go 1.26.4 以上が必要です。依存ライブラリは `modernc.org/sqlite`（CGO 不要の純粋 Go 実装）のみです。
 
 ---
 
@@ -59,6 +61,7 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 | 変数名 | デフォルト | 説明 |
 |--------|-----------|------|
 | `SHIRUSHI_PASSWORD` | （必須） | ログインパスワード。未設定だと起動しません |
+| `SHIRUSHI_API_TOKEN` | （未設定） | Bearer認証用トークン。未設定の場合はCookie認証のみ有効 |
 | `SHIRUSHI_ADDR` | `:8181` | 待ち受けアドレス。Caddy 同一ホスト構成では `127.0.0.1:8181` を推奨 |
 | `SHIRUSHI_COOKIE_SECURE` | （未設定） | `1` にするとセッション Cookie に `Secure` 属性を付与。HTTPS 運用時に設定 |
 | `SHIRUSHI_ALLOW_PRIVATE_FETCH` | （未設定） | `1` にするとメタデータ取得時の SSRF チェックを無効化。社内ツールなど限定用途向け |

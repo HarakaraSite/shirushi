@@ -39,8 +39,14 @@ POST /api/login
 **リクエスト**
 
 ```json
-{ "password": "yourpassword" }
+{
+  "password": "yourpassword",
+  "rememberMe": false
+}
 ```
+
+`rememberMe` は省略可能です。`true` にするとログイン状態を30日間維持します。
+`false` または省略時のCookieはブラウザ終了時に削除され、サーバー側セッションは24時間で失効します。
 
 **レスポンス** `200 OK`
 
@@ -48,7 +54,8 @@ POST /api/login
 { "status": "ok" }
 ```
 
-`session` Cookie が発行されます（有効期限 24 時間、`HttpOnly` + `SameSite=Strict`）。
+`session` Cookie が発行されます（`HttpOnly` + `SameSite=Strict`）。
+`rememberMe: true` の場合は有効期限30日、未指定または `false` の場合はセッションCookieです。
 `SHIRUSHI_COOKIE_SECURE=1` の場合は `Secure` 属性も付与されます。
 
 **エラー**

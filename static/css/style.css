@@ -753,11 +753,16 @@ button:hover {
 }
 
 /* ===== ページネーション ===== */
-#pagination {
+.pagination-container {
   display: flex;
   justify-content: center;
   margin-top: 24px;
   margin-bottom: 24px;
+}
+
+/* 上部は一覧との間だけ余白を確保し、検索条件から離れすぎないようにします。 */
+.pagination-top {
+  margin-top: 8px;
 }
 
 .pagination {

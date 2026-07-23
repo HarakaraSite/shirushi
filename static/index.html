@@ -108,13 +108,16 @@
       <button type="button" class="bulk-cancel" onclick="clearSelection()" style="background:transparent; color:#fff; padding:4px 8px;">✕ 選択解除</button>
     </div>
 
+    <!-- 上部ページネーション：件数が多いとき、一覧を下まで移動せずページを切り替えられます -->
+    <nav class="pagination-container pagination-top" aria-label="上部ページネーション"></nav>
+
     <!-- ブックマーク一覧 -->
     <div id="bookmark-list">
       <p>読み込み中...</p>
     </div>
 
-    <!-- ページネーション -->
-    <div id="pagination"></div>
+    <!-- 下部ページネーション -->
+    <nav class="pagination-container pagination-bottom" aria-label="下部ページネーション"></nav>
 
   </div><!-- #main-screen ここまで -->
 

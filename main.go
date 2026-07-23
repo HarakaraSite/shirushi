@@ -13,6 +13,7 @@ import (
 	"log"          // 致命的なエラー時にサーバーを終了するパッケージ
 	"net/http"     // Webサーバー機能を提供するパッケージ
 	"os"           // 環境変数を読み取るパッケージ
+	"strings"      // 待ち受けアドレスがポート番号だけか判定するパッケージ
 	"time"         // サーバーのタイムアウト設定に使うパッケージ
 )
 
@@ -121,7 +122,10 @@ func main() {
 	if addr == "" {
 		addr = ":8181"
 	}
-	fmt.Println("サーバーを起動しました: http://localhost" + addr)
+	// ":8181" のようにポート番号だけ指定された場合は、ブラウザで開けるよう
+	// 表示用URLに localhost を補います。"127.0.0.1:18181" のようにホストが
+	// 含まれている場合は、その前に localhost を重ねず、そのまま表示します。
+	fmt.Println("サーバーを起動しました: " + serverDisplayURL(addr))
 	// 6. http.DefaultServeMux を authMiddleware でラップして全リクエストに認証を適用します。
 	server := &http.Server{
 		Addr:              addr,
@@ -134,4 +138,13 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal("サーバー起動エラー:", err)
 	}
+}
+
+// serverDisplayURL：net/httpの待ち受けアドレスを、ブラウザで開けるURLへ変換します。
+// サーバーが実際に待ち受ける値は変更せず、起動メッセージの表示だけを整えます。
+func serverDisplayURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		addr = "localhost" + addr
+	}
+	return "http://" + addr
 }

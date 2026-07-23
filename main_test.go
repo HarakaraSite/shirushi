@@ -123,6 +123,26 @@ func newMultipartImportRequest(t *testing.T, html string) *http.Request {
 	return r
 }
 
+// TestServerDisplayURL：ポート番号だけの場合とホスト指定済みの場合の表示を確認します。
+func TestServerDisplayURL(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{name: "ポート番号だけ", addr: ":8181", want: "http://localhost:8181"},
+		{name: "IPv4ホスト指定", addr: "127.0.0.1:18181", want: "http://127.0.0.1:18181"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := serverDisplayURL(tt.addr); got != tt.want {
+				t.Errorf("表示URLが違います: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestHandleGetBookmarks_Empty：データが0件のときに空配列が返るかテストします。
 func TestHandleGetBookmarks_Empty(t *testing.T) {
 	setupTestDB(t)
@@ -937,8 +957,9 @@ func TestHandleLogin_AllowsAfterLockoutExpires(t *testing.T) {
 // TestGetClientIP_UsesForwardedHeaderFromLocalProxy：ローカルプロキシ経由では転送元IPを使うかテストします。
 // Caddy は X-Forwarded-For に実際の接続元IPを末尾に追記するため、末尾を採用します。
 // シナリオ: 攻撃者(203.0.113.30)が X-Forwarded-For: 10.0.0.1 を偽装して送信 →
-//           Caddy が本物の接続元 203.0.113.30 を末尾に追記 →
-//           Shirushi は末尾を採用して攻撃者の本物IPを取得します。
+//
+//	Caddy が本物の接続元 203.0.113.30 を末尾に追記 →
+//	Shirushi は末尾を採用して攻撃者の本物IPを取得します。
 func TestGetClientIP_UsesForwardedHeaderFromLocalProxy(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/login", nil)
 	r.RemoteAddr = "127.0.0.1:12345"
