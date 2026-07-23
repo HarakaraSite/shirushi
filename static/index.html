@@ -58,13 +58,22 @@
       </div>
     </div>
 
-    <!-- 検索バー -->
-    <input
-      type="search"
-      id="search-input"
-      placeholder="タイトル・URL・メモで検索..."
-      style="width:100%; margin-bottom:16px;"
-    >
+    <!-- 検索バーと1ページあたりの表示件数 -->
+    <div class="list-controls">
+      <input
+        type="search"
+        id="search-input"
+        placeholder="タイトル・URL・メモで検索..."
+      >
+      <label class="page-size-control" for="page-size-select">
+        表示件数
+        <select id="page-size-select" onchange="changePageSize(this.value)">
+          <option value="50">50件</option>
+          <option value="100">100件</option>
+          <option value="200">200件</option>
+        </select>
+      </label>
+    </div>
 
     <!-- タグフィルターチップ（タグがあるときだけ表示） -->
     <div id="tag-filter-area" style="display:none;"></div>

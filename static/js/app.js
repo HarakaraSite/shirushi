@@ -6,7 +6,9 @@ let selectedIds = new Set(); // バッチ選択中のブックマークID集合
 let pendingImageUrl = ''; // メタデータ取得で得たOG画像URL（フォーム送信まで保持）
 let currentPage = 1;     // 現在表示しているページ番号（1始まり）
 let tagInputInitialized = false; // タグ入力欄のイベント登録が済んでいるか
-const PAGE_SIZE = 50;    // 1ページあたりの表示件数
+const PAGE_SIZE_STORAGE_KEY = 'shirushi-page-size';
+const ALLOWED_PAGE_SIZES = [50, 100, 200];
+let pageSize = loadSavedPageSize(); // 保存済みの表示件数。未保存・不正値なら50件です。
 
 // OG画像がない・読み込み失敗時に使うSVGプレースホルダーです。
 // data URI にすることでファイル不要でインラインに埋め込めます。
@@ -20,6 +22,8 @@ const bookmarkMap = new Map(); // Map<id: number, bookmark: object>
 
 // ページ読み込み時に認証状態を確認します。
 document.addEventListener('DOMContentLoaded', async () => {
+  // selectの初期表示を、localStorageから復元した件数に合わせます。
+  document.getElementById('page-size-select').value = String(pageSize);
   await checkAuth();
 });
 
@@ -28,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function checkAuth() {
   let res;
   try {
-    res = await fetch('/api/bookmarks');
+    res = await fetch(`/api/bookmarks?limit=${pageSize}`);
   } catch (err) {
     console.error('認証確認に失敗しました:', err);
     showLoginScreen('サーバーに接続できません');
@@ -194,6 +198,36 @@ function toggleTagFilter(tagName) {
   loadBookmarks(q, activeTag);
 }
 
+// loadSavedPageSize：前回選んだ表示件数をブラウザから復元します。
+// localStorageには文字列で保存されるため数値に変換し、許可した値だけを採用します。
+function loadSavedPageSize() {
+  try {
+    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return ALLOWED_PAGE_SIZES.includes(saved) ? saved : 50;
+  } catch (err) {
+    // ブラウザの設定でlocalStorageが使えなくても、50件表示で通常利用できます。
+    console.warn('表示件数の設定を読み込めませんでした:', err);
+    return 50;
+  }
+}
+
+// changePageSize：表示件数を変更し、検索・タグ条件を保ったまま1ページ目へ戻ります。
+function changePageSize(value) {
+  const nextSize = Number(value);
+  if (!ALLOWED_PAGE_SIZES.includes(nextSize)) return;
+
+  pageSize = nextSize;
+  try {
+    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
+  } catch (err) {
+    // 保存に失敗しても、現在の画面では選んだ件数をそのまま利用します。
+    console.warn('表示件数の設定を保存できませんでした:', err);
+  }
+
+  const q = document.getElementById('search-input').value.trim();
+  loadBookmarks(q, activeTag, 1);
+}
+
 // q（キーワード）・tag（タグ名）・page（ページ番号）を組み合わせてブックマークを取得します。
 // 検索やタグフィルターが変わった場合は page=1 にリセットして呼び出します。
 // preloadedRes が渡された場合はAPIを呼ばず、そのレスポンスを使います（起動時の再利用）。
@@ -206,6 +240,7 @@ async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) 
   if (q)        params.set('q',    q);
   if (tag)      params.set('tag',  tag);
   if (page > 1) params.set('page', page);
+  params.set('limit', pageSize);
   const qs = params.toString();
   const url = qs ? `/api/bookmarks?${qs}` : '/api/bookmarks';
 
@@ -220,7 +255,7 @@ async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) 
   // 最終ページに移動し直します（例: 3ページ目を表示中にタグ削除で2ページに減った）。
   // これがないと、データはあるのに「ブックマークはまだありません」と表示されます。
   if (bookmarks.length === 0 && total > 0 && page > 1) {
-    return loadBookmarks(q, tag, Math.ceil(total / PAGE_SIZE));
+    return loadBookmarks(q, tag, Math.ceil(total / pageSize));
   }
 
   if (bookmarks.length === 0) {
@@ -430,7 +465,7 @@ function getPageNumbers(current, total) {
 // total（総件数）と currentPage から表示内容を決めます。
 function renderPagination(total, page) {
   const el = document.getElementById('pagination');
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const totalPages = Math.ceil(total / pageSize);
 
   // 1ページに収まる場合は表示しません。
   if (totalPages <= 1) {
