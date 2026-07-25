@@ -1,42 +1,44 @@
-# Shirushi API リファレンス
+# Shirushi API Reference
 
-ベース URL: `http://localhost:8181`（`SHIRUSHI_ADDR` で変更可）
+Base URL: `http://localhost:8181` (configurable with `SHIRUSHI_ADDR`)
 
-すべての API は JSON を返します（`Content-Type: application/json`）。
-`/api/login` と `/api/logout` 以外は認証が必要です。
-未認証リクエストには `401 Unauthorized` を返します。
+All API endpoints return JSON (`Content-Type: application/json`). Authentication
+is required except for `/api/login` and `/api/logout`. Unauthenticated requests
+receive `401 Unauthorized`.
 
-### 認証方式
+Japanese version: [api.ja.md](api.ja.md)
 
-| 方式 | 用途 | 設定 |
-|------|------|------|
-| セッション Cookie | Web UI | `POST /api/login` でログイン |
-| Bearer トークン | ブラウザ拡張など Cookie を使えないクライアント | 環境変数 `SHIRUSHI_API_TOKEN` を設定して起動 |
+### Authentication methods
 
-どちらか一方が有効であればリクエストは通過します。
+| Method | Use | Configuration |
+|--------|-----|---------------|
+| Session cookie | Web UI | Log in with `POST /api/login` |
+| Bearer token | Clients that cannot use cookies, such as browser extensions | Start with the `SHIRUSHI_API_TOKEN` environment variable set |
 
-**Bearer トークンの使い方**
+A request is accepted when either method is valid.
+
+**Using a Bearer token**
 
 ```
-Authorization: Bearer <SHIRUSHI_API_TOKEN の値>
+Authorization: Bearer <value of SHIRUSHI_API_TOKEN>
 ```
 
-- `SHIRUSHI_API_TOKEN` が未設定の場合、Bearer 認証は無効（Cookie のみ有効）
-- 起動時に `"SHIRUSHI_API_TOKEN が設定されていません"` という警告ログが出る
-- トークンは `openssl rand -hex 32` で生成した 256bit 文字列を推奨
-- `Bearer ` プレフィックスは大文字小文字を厳密に区別（`bearer ` は不一致）
+- Bearer authentication is disabled when `SHIRUSHI_API_TOKEN` is unset; cookie authentication remains available.
+- A warning containing `SHIRUSHI_API_TOKEN` is logged at startup when it is unset.
+- Generate the token with `openssl rand -hex 32` (a 256-bit value is recommended).
+- The `Bearer ` prefix is case-sensitive; `bearer ` does not match.
 
 ---
 
-## 認証 API
+## Authentication API
 
-### ログイン
+### Log in
 
 ```
 POST /api/login
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 {
@@ -45,71 +47,72 @@ POST /api/login
 }
 ```
 
-`rememberMe` は省略可能です。`true` にするとログイン状態を30日間維持します。
-`false` または省略時のCookieはブラウザ終了時に削除され、サーバー側セッションは24時間で失効します。
+`rememberMe` is optional. When `true`, the login is kept for 30 days. The cookie
+is removed when the browser closes if it is `false` or omitted, and the
+server-side session expires after 24 hours.
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 { "status": "ok" }
 ```
 
-`session` Cookie が発行されます（`HttpOnly` + `SameSite=Strict`）。
-`rememberMe: true` の場合は有効期限30日、未指定または `false` の場合はセッションCookieです。
-`SHIRUSHI_COOKIE_SECURE=1` の場合は `Secure` 属性も付与されます。
+The server issues a `session` cookie (`HttpOnly` + `SameSite=Strict`). Its
+expiration is 30 days when `rememberMe: true`; otherwise it is a session cookie.
+`SHIRUSHI_COOKIE_SECURE=1` also adds the `Secure` attribute.
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `401` | パスワードが違う |
-| `429` | 同一 IP から 15 分以内に 5 回失敗（15 分ロック） |
+| Status | Meaning |
+|--------|---------|
+| `401` | Incorrect password |
+| `429` | Five failures from the same IP within 15 minutes (locked for 15 minutes) |
 
 ---
 
-### ログアウト
+### Log out
 
 ```
 POST /api/logout
 ```
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 { "status": "ok" }
 ```
 
-`session` Cookie を削除します。リクエストボディは不要です。
+Deletes the `session` cookie. No request body is required.
 
 ---
 
-## ブックマーク
+## Bookmarks
 
-### 一覧取得
+### List bookmarks
 
 ```
 GET /api/bookmarks
 ```
 
-**クエリパラメータ**
+**Query parameters**
 
-| パラメータ | 型 | デフォルト | 説明 |
-|-----------|-----|-----------|------|
-| `q` | string | — | タイトル・URL・抜粋の部分一致検索。数字のみの場合は日付検索（後述） |
-| `tag` | string | — | タグ名で絞り込み。`__untagged__` でタグなしのみ表示 |
-| `date_from` | string | — | 登録日の開始月（`YYYY-MM` 形式） |
-| `date_to` | string | — | 登録日の終了月（`YYYY-MM` 形式、その月末まで含む） |
-| `page` | int | `1` | ページ番号（1 始まり） |
-| `limit` | int | `50` | 1 ページあたりの件数（最大 `200`） |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string | — | Partial-match search across title, URL, and excerpt. A numeric value performs a date search (below). |
+| `tag` | string | — | Filter by tag name. Use `__untagged__` to show only untagged bookmarks. |
+| `date_from` | string | — | Start month of the registration date (`YYYY-MM`). |
+| `date_to` | string | — | End month of the registration date (`YYYY-MM`, including the final day of that month). |
+| `page` | int | `1` | Page number (one-based). |
+| `limit` | int | `50` | Items per page (maximum `200`). |
 
-**日付検索（`q` パラメータ）**
+**Date search (`q` parameter)**
 
-| 入力例 | 動作 |
-|--------|------|
-| `202507` | 2025 年 7 月に登録したブックマーク |
-| `2025` | 2025 年に登録したブックマーク |
+| Input example | Result |
+|---------------|--------|
+| `202507` | Bookmarks registered in July 2025 |
+| `2025` | Bookmarks registered in 2025 |
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 {
@@ -118,7 +121,7 @@ GET /api/bookmarks
       "id": 1,
       "url": "https://example.com",
       "title": "Example",
-      "excerpt": "説明文",
+      "excerpt": "Description",
       "author": "",
       "public": 0,
       "has_content": false,
@@ -134,43 +137,43 @@ GET /api/bookmarks
 }
 ```
 
-`total` は絞り込み条件込みの総件数です。ページネーションのページ数計算に使います。
-タグなしのブックマークは `"tags": []` になります（`null` にはなりません）。
+`total` is the total count after applying filters; use it to calculate the
+number of pagination pages. Untagged bookmarks have `"tags": []`, never `null`.
 
 ---
 
-### 作成
+### Create a bookmark
 
 ```
 POST /api/bookmarks
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 {
   "url": "https://example.com",
   "title": "Example",
-  "excerpt": "説明文",
+  "excerpt": "Description",
   "author": "",
   "image_url": "",
   "tags": [{ "id": 3 }]
 }
 ```
 
-`tags` は省略可能です。省略した場合はタグなしで作成されます。
-`url` は `http` または `https` で始まる必要があります。
+`tags` is optional. When omitted, the bookmark is created without tags. `url`
+must begin with `http` or `https`.
 
-**レスポンス** `201 Created`
+**Response** `201 Created`
 
-作成されたブックマークを返します（`created_at` / `modified_at` は DB の値）。
+Returns the created bookmark (`created_at` and `modified_at` are database values).
 
 ```json
 {
   "id": 42,
   "url": "https://example.com",
   "title": "Example",
-  "excerpt": "説明文",
+  "excerpt": "Description",
   "author": "",
   "public": 0,
   "has_content": false,
@@ -181,82 +184,82 @@ POST /api/bookmarks
 }
 ```
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `400` | `url` が空、または `http`/`https` 以外のスキーム |
-| `409` | 同じ URL が既に登録されている |
+| Status | Meaning |
+|--------|---------|
+| `400` | Empty `url`, or a scheme other than `http`/`https` |
+| `409` | The URL is already registered |
 
 ---
 
-### 更新
+### Update a bookmark
 
 ```
 PUT /api/bookmarks/{id}
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 {
   "url": "https://example.com",
-  "title": "新しいタイトル",
-  "excerpt": "新しい説明",
+  "title": "New title",
+  "excerpt": "New description",
   "author": "",
   "image_url": "",
   "tags": [{ "id": 3 }, { "id": 5 }]
 }
 ```
 
-`tags` を**省略**するとタグは変更されません。
-`tags` を**空配列 `[]`** にすると全タグが削除されます。
+When `tags` is **omitted**, tags are not changed. When `tags` is an **empty
+array (`[]`)**, all tags are removed.
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
-更新後のブックマークを返します（`modified_at` に更新日時が入ります）。
+Returns the updated bookmark (`modified_at` contains the update time).
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `400` | `url` が不正 |
-| `404` | 指定した ID が存在しない |
-| `409` | 別のブックマークが同じ URL を使っている |
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid `url` |
+| `404` | The specified ID does not exist |
+| `409` | Another bookmark uses the same URL |
 
 ---
 
-### 削除（1 件）
+### Delete one bookmark
 
 ```
 DELETE /api/bookmarks/{id}
 ```
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `404` | 指定した ID が存在しない |
+| Status | Meaning |
+|--------|---------|
+| `404` | The specified ID does not exist |
 
 ---
 
-### 一括削除
+### Delete bookmarks in bulk
 
 ```
 DELETE /api/bookmarks
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 { "ids": [1, 2, 3] }
 ```
 
-最大 1000 件まで。
+At most 1,000 bookmarks may be deleted at once.
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 { "deleted": 3 }
@@ -264,21 +267,21 @@ DELETE /api/bookmarks
 
 ---
 
-## タグ
+## Tags
 
-### 一覧取得
+### List tags
 
 ```
 GET /api/tags
 ```
 
-**クエリパラメータ**
+**Query parameters**
 
-| パラメータ | 説明 |
-|-----------|------|
-| `all=1` | 未使用タグも含めた全タグを返す（省略時はブックマークに使われているタグのみ） |
+| Parameter | Description |
+|-----------|-------------|
+| `all=1` | Return all tags, including unused tags. Without it, only tags used by bookmarks are returned. |
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 [
@@ -287,27 +290,28 @@ GET /api/tags
 ]
 ```
 
-タグが 0 件のときは `[]` を返します（`null` にはなりません）。
+Returns `[]`, never `null`, when there are no tags.
 
 ---
 
-### 作成
+### Create a tag
 
 ```
 POST /api/tags
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 { "name": "newtagname" }
 ```
 
-同名タグが既に存在する場合は新規作成せず既存タグを返します（エラーになりません）。
-新規作成・既存返却いずれの場合も **`201 Created`** を返します。
-クライアントは `status === 201` ではなく `res.ok`（200–299）で成否を判定してください。
+When a tag with the same name already exists, the existing tag is returned
+instead of creating a new one; this is not an error. Both new and existing tags
+produce **`201 Created`**. Clients must determine success using `res.ok`
+(200–299), not `status === 201`.
 
-**レスポンス** `201 Created`
+**Response** `201 Created`
 
 ```json
 { "id": 5, "name": "newtagname" }
@@ -315,101 +319,101 @@ POST /api/tags
 
 ---
 
-### 更新（タグ名変更）
+### Update a tag (rename)
 
 ```
 PUT /api/tags/{id}
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 { "name": "renamed" }
 ```
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 { "id": 5, "name": "renamed" }
 ```
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `404` | 指定した ID が存在しない |
+| Status | Meaning |
+|--------|---------|
+| `404` | The specified ID does not exist |
 
 ---
 
-### 削除
+### Delete a tag
 
 ```
 DELETE /api/tags/{id}
 ```
 
-タグに紐付いた `bookmark_tags` は CASCADE で自動削除されます。
+Related `bookmark_tags` records are removed automatically through CASCADE.
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `404` | 指定した ID が存在しない |
+| Status | Meaning |
+|--------|---------|
+| `404` | The specified ID does not exist |
 
 ---
 
-## ブックマークとタグの紐付け
+## Bookmark-tag associations
 
-### タグを追加（1 件）
+### Add one tag
 
 ```
 POST /api/bookmarks/{id}/tags
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 { "tag_id": 3 }
 ```
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
-既に紐付いている場合も `204` を返します（重複追加は無視されます）。
+Returns `204` even when the association already exists; duplicate additions are ignored.
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `404` | ブックマークまたはタグが存在しない |
+| Status | Meaning |
+|--------|---------|
+| `404` | The bookmark or tag does not exist |
 
 ---
 
-### タグを削除（1 件）
+### Remove one tag
 
 ```
 DELETE /api/bookmarks/{id}/tags
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 { "tag_id": 3 }
 ```
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
 ---
 
-### タグを一括追加
+### Add tags in bulk
 
 ```
 POST /api/bookmarks/bulk/tags
 ```
 
-複数のブックマークに複数のタグをまとめて付与します。
+Adds multiple tags to multiple bookmarks in one request.
 
-**リクエスト**
+**Request**
 
 ```json
 {
@@ -418,27 +422,27 @@ POST /api/bookmarks/bulk/tags
 }
 ```
 
-- `bookmark_ids` / `tag_ids` それぞれ最大 1000 件
-- `bookmark_ids × tag_ids` の組み合わせ数は最大 5000
-- 既に紐付いているペアはスキップされます
+- `bookmark_ids` and `tag_ids` may each contain at most 1,000 items.
+- The number of `bookmark_ids × tag_ids` combinations may not exceed 5,000.
+- Associations that already exist are skipped.
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `404` | 指定した bookmark_id または tag_id の一部が存在しない |
+| Status | Meaning |
+|--------|---------|
+| `404` | Some specified bookmark ID or tag ID does not exist |
 
 ---
 
-### タグを一括削除
+### Remove tags in bulk
 
 ```
 DELETE /api/bookmarks/bulk/tags
 ```
 
-**リクエスト**
+**Request**
 
 ```json
 {
@@ -447,78 +451,80 @@ DELETE /api/bookmarks/bulk/tags
 }
 ```
 
-**レスポンス** `204 No Content`
+**Response** `204 No Content`
 
 ---
 
-## メタデータ取得
+## Fetch metadata
 
 ```
 POST /api/fetch-metadata
 ```
 
-指定した URL の OGP メタデータを取得して返します。ブックマークの保存は行いません。
+Fetches and returns OGP metadata for the specified URL. It does not save a
+bookmark.
 
-**リクエスト**
+**Request**
 
 ```json
 { "url": "https://example.com" }
 ```
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 {
   "title": "Example Domain",
-  "excerpt": "ページの説明文",
+  "excerpt": "Page description",
   "author": "",
   "image_url": "https://example.com/og.png"
 }
 ```
 
-| フィールド | 取得元 |
-|-----------|--------|
-| `title` | `og:title` → `<title>` の順にフォールバック |
-| `excerpt` | `og:description` → `meta[name=description]` |
-| `author` | `og:author` → `meta[name=author]` |
+| Field | Source |
+|-------|--------|
+| `title` | Falls back from `og:title` to `<title>` |
+| `excerpt` | Falls back from `og:description` to `meta[name=description]` |
+| `author` | Falls back from `og:author` to `meta[name=author]` |
 | `image_url` | `og:image` |
 
-**エラー**
+**Errors**
 
-| ステータス | 内容 |
-|-----------|------|
-| `400` | URL が空、または `http`/`https` 以外 |
-| `502` | 外部 URL へのアクセス失敗（タイムアウト・SSRF ブロック・非 HTML レスポンスなど） |
+| Status | Meaning |
+|--------|---------|
+| `400` | Empty URL, or a scheme other than `http`/`https` |
+| `502` | Could not access the external URL (timeout, SSRF block, non-HTML response, etc.) |
 
 ---
 
-## インポート・エクスポート
+## Import and export
 
-### エクスポート
+### Export
 
 ```
 GET /api/export
 ```
 
-全ブックマークを Netscape Bookmark 形式（Chrome / Firefox のエクスポート形式）で返します。
+Returns all bookmarks in Netscape Bookmark format (the format exported by
+Chrome and Firefox).
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
-`Content-Type: text/html` のファイルダウンロード（`shirushi-bookmarks.html`）。
+A file download named `shirushi-bookmarks.html` with `Content-Type: text/html`.
 
 ---
 
-### インポート
+### Import
 
 ```
 POST /api/import
 ```
 
-Netscape Bookmark 形式の HTML ファイルをアップロードして登録します。
+Uploads and registers a Netscape Bookmark HTML file.
 
-**リクエスト**
+**Request**
 
-`multipart/form-data` で `file` フィールドに HTML ファイルを添付します（最大 10 MB）。
+Attach the HTML file in the `file` field as `multipart/form-data` (maximum 10 MB).
 
 ```bash
 curl -b 'session=<token>' \
@@ -526,34 +532,35 @@ curl -b 'session=<token>' \
      http://localhost:8181/api/import
 ```
 
-**レスポンス** `200 OK`
+**Response** `200 OK`
 
 ```json
 { "imported": 42, "skipped": 5 }
 ```
 
-`skipped` は重複 URL でスキップされた件数です。
-インポート後、新規登録されたブックマークのサムネイル（OG 画像）をバックグラウンドで順次取得します（レスポンス返却後に非同期で実行）。
+`skipped` is the number of duplicate URLs skipped. After import, thumbnails
+(OGP images) for newly registered bookmarks are fetched asynchronously in the
+background, after the response has been returned.
 
 ---
 
-## 共通仕様
+## Common behavior
 
-### リクエストサイズ上限
+### Request-size limits
 
-| API | 上限 |
-|-----|------|
-| JSON API（ログイン・ブックマーク・タグ等） | 1 MB |
-| インポート（`/api/import`） | 10 MB |
+| API | Limit |
+|-----|-------|
+| JSON APIs (login, bookmarks, tags, etc.) | 1 MB |
+| Import (`/api/import`) | 10 MB |
 
-### 共通エラー
+### Common errors
 
-| ステータス | 内容 |
-|-----------|------|
-| `400 Bad Request` | リクエスト形式の誤り・必須フィールド欠如・バリデーション失敗 |
-| `401 Unauthorized` | セッション Cookie がない・期限切れ、または Bearer トークンが不正 |
-| `404 Not Found` | 指定した ID が存在しない |
-| `409 Conflict` | URL の重複 |
-| `429 Too Many Requests` | ログイン失敗によるロック |
-| `500 Internal Server Error` | サーバー内部エラー |
-| `502 Bad Gateway` | 外部 URL へのアクセス失敗（メタデータ取得のみ） |
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | Invalid request format, missing required field, or validation failure |
+| `401 Unauthorized` | Missing or expired session cookie, or invalid Bearer token |
+| `404 Not Found` | The specified ID does not exist |
+| `409 Conflict` | Duplicate URL |
+| `429 Too Many Requests` | Lockout caused by failed logins |
+| `500 Internal Server Error` | Internal server error |
+| `502 Bad Gateway` | Could not access the external URL (metadata fetching only) |

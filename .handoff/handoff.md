@@ -15,3 +15,19 @@
 ### 連絡・注意事項
 - 既存release.ymlはv0.5.3時点と同一で、FORGE_URLとRELEASE_TOKENを使うため変更していない。
 - メタデータ画像のtwitter:image/faviconフォールバック案は効果と視認性を検討して中止した。
+
+## 2026-07-25 19:30 JST
+
+- 実行エージェント: Codex
+- モデル: GPT-5 Codex
+- 作業トピック: README・API リファレンスの英日二言語化
+
+### 実施したこと
+- `README.md` と `docs/api.md` を英語版にし、日本語版を `README.ja.md` と `docs/api.ja.md` に分離した。
+- 各 README と API リファレンスに相互リンクを追加し、言語に対応する API 文書へリンクした。
+
+### 次のタスク候補
+- v1.0.0 リリース時に、配布先で README の表示と言語リンクを確認する。
+
+### 連絡・注意事項
+- API 仕様は変更していない。英日ともに 18 エンドポイントを記載し、`git diff --check` は成功した。
