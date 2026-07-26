@@ -250,6 +250,15 @@ button:hover {
   color: var(--s-text);
 }
 
+/* 編集では長いExcerptを読み書きしやすいよう、追加モーダルより大きく表示します。 */
+#modal-box.editing {
+  min-height: min(70vh, 640px);
+}
+
+#modal-box.editing #input-excerpt {
+  min-height: 12rem;
+}
+
 /* モーダル内のボタン行 */
 .modal-actions {
   display: flex;
@@ -817,6 +826,13 @@ button:hover {
   flex-shrink: 0;
 }
 
+/* 「編集」「AI」「削除」を同じ大きさにして、カードごとの操作列を整えます。 */
+.bookmark-actions button {
+  width: 4rem;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+}
+
 .edit-btn {
   background: var(--s-accent-dim);
   color: var(--s-accent);
@@ -827,6 +843,20 @@ button:hover {
 
 .edit-btn:hover {
   background: var(--s-accent);
+  color: #fff;
+}
+
+/* AI要約は編集とは別の非同期操作だと分かる色にします。 */
+.ai-summary-btn {
+  background: rgba(130, 100, 255, 0.16);
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
+.ai-summary-btn:hover {
+  background: rgba(130, 100, 255, 0.32);
   color: #fff;
 }
 

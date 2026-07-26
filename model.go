@@ -61,6 +61,18 @@ var db *sql.DB
 // 空文字の場合は Bearer 認証が無効（Cookie のみで動作）です。
 var apiToken string
 
+// henjiSummarySettings：本文要約でHenjiへ渡すprovider/modelの組です。
+// APIキーはここに持たず、Henji自身の設定だけで解決します。
+var henjiSummarySettings HenjiSummarySettings
+
+// HenjiSummarySettings：起動引数で選べるHenjiのprovider/modelを表します。
+type HenjiSummarySettings struct {
+	Path          string
+	API           string
+	Model         string
+	MaxInputBytes int
+}
+
 // sessions：ログイン中のセッショントークンと有効期限を管理するマップです。
 // 複数のリクエストが同時にアクセスしても安全なよう sync.Mutex で保護します。
 var (

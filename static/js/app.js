@@ -6,6 +6,7 @@ let selectedIds = new Set(); // バッチ選択中のブックマークID集合
 let pendingImageUrl = ''; // メタデータ取得で得たOG画像URL（フォーム送信まで保持）
 let currentPage = 1;     // 現在表示しているページ番号（1始まり）
 let tagInputInitialized = false; // タグ入力欄のイベント登録が済んでいるか
+let henjiSummaryAvailable = false; // サーバー上でHenjiを起動できるか
 const PAGE_SIZE_STORAGE_KEY = 'shirushi-page-size';
 const ALLOWED_PAGE_SIZES = [50, 100, 200];
 let pageSize = loadSavedPageSize(); // 保存済みの表示件数。未保存・不正値なら50件です。
@@ -82,9 +83,27 @@ function showLoginScreen(message = '') {
 async function showMainScreen(preloadedRes = null) {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-screen').style.display = 'block';
+  await loadHenjiSummaryCapability();
   await loadTags();
   await loadBookmarks('', null, 1, preloadedRes);
   setupTagInput();
+}
+
+// Henjiが未導入なら、要約機能自体を画面に出さないための能力確認です。
+// 取得に失敗しても通常のブックマーク操作を妨げないよう、利用不可として扱います。
+async function loadHenjiSummaryCapability() {
+  const res = await apiFetch('/api/capabilities');
+  if (!res || !res.ok) {
+    henjiSummaryAvailable = false;
+    return;
+  }
+
+  try {
+    const capabilities = await res.json();
+    henjiSummaryAvailable = capabilities.henji_summary === true;
+  } catch (err) {
+    henjiSummaryAvailable = false;
+  }
 }
 
 document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -321,11 +340,12 @@ async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) 
             ${b.tags.map(t => `<span class="tag-badge">${escapeHtml(t.name)}</span>`).join('')}
           </div>
         ` : ''}
-        <!-- フッター：日付（左）と編集・削除ボタン（右） -->
+        <!-- フッター：日付（左）と保存済みbookmarkへの操作ボタン（右） -->
         <div class="bookmark-footer">
           <div class="date">${new Date(b.created_at).toLocaleDateString('ja-JP')}</div>
           <div class="bookmark-actions">
             <button class="edit-btn"   onclick="openEditModal(${b.id})">編集</button>
+            ${henjiSummaryAvailable ? `<button class="ai-summary-btn" onclick="startAISummary(${b.id})">AI</button>` : ''}
             <button class="delete-btn" onclick="deleteBookmark(${b.id})">削除</button>
           </div>
         </div>
@@ -532,6 +552,7 @@ function escapeHtml(str) {
 function openModal() {
   editingId = null;
   pendingImageUrl = ''; // 画像URLをリセットします
+  document.getElementById('modal-box').classList.remove('editing');
   document.getElementById('modal-heading').textContent = 'ブックマークを追加';
   document.getElementById('modal-submit-btn').textContent = '登録';
   document.getElementById('bookmark-form').reset();
@@ -541,15 +562,22 @@ function openModal() {
   document.getElementById('input-url').focus();
 }
 
-// 「編集モード」でモーダルを開きます。既存データをフォームに入れます。
-// 引数は bookmark の ID です。データは bookmarkMap から取得します。
-// ※ onclick に JSON.stringify を直接埋め込むと、タイトル・抜粋に含まれる
-//    シングルクォート等でHTML属性が壊れるため、ID経由でMapを引く方式にしています。
-function openEditModal(id) {
-  const b = bookmarkMap.get(id);
-  if (!b) return; // 念のため存在チェック
+// 「編集モード」でモーダルを開きます。開く直前に1件取得APIを呼ぶことで、
+// Henjiが非同期で更新したExcerptも、ページを再読み込みせずにフォームへ反映します。
+async function openEditModal(id) {
+  const res = await apiFetch(`/api/bookmarks/${id}`);
+  if (!res) return; // セッション切れ
+  if (!res.ok) {
+    const message = (await res.text()).trim();
+    alert(message || 'ブックマークの取得に失敗しました');
+    return;
+  }
+  const b = await res.json();
+  // 次に同じカードを描画するまで、画面内のキャッシュも最新値へ揃えます。
+  bookmarkMap.set(b.id, b);
 
   editingId = b.id;
+  document.getElementById('modal-box').classList.add('editing');
   document.getElementById('modal-heading').textContent = 'ブックマークを編集';
   document.getElementById('modal-submit-btn').textContent = '更新';
 
@@ -569,6 +597,18 @@ function openEditModal(id) {
 
   document.getElementById('modal-overlay').classList.add('open');
   document.getElementById('input-title').focus();
+}
+
+// カード上の保存済みbookmarkから要約を開始します。編集フォームを経由させないため、
+// 未保存のExcerptを通常更新で上書きする導線を作りません。
+// 完了通知・ポーリング・ボタン無効化はMVPの対象外です。
+async function startAISummary(id) {
+  if (!henjiSummaryAvailable || !Number.isInteger(id)) return;
+
+  const confirmed = window.confirm('AI要約が完了すると、現在の「メモ・抜粋」を自動で上書きします。開始しますか？');
+  if (!confirmed) return;
+
+  await apiFetch(`/api/bookmarks/${id}/summary`, { method: 'POST' });
 }
 
 // モーダルを閉じます。

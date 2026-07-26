@@ -240,6 +240,25 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetBookmark：指定IDのbookmarkを、タグを含めて1件だけ返します。
+// 編集モーダルを開く直前にDBの最新値を読み、非同期要約後のExcerptを古い画面内データで
+// 上書きしないために使います。
+func handleGetBookmark(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "IDが不正です", http.StatusBadRequest)
+		return
+	}
+
+	bookmark, err := getBookmarkByID(id)
+	if err != nil {
+		http.Error(w, "指定されたIDが見つかりません", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bookmark)
+}
+
 // syncBookmarkTags：ブックマークのタグ紐付けを同期するヘルパー関数です。
 // 既存の紐付けを全削除してから、新しいタグを挿入します（置き換え方式）。
 // タグが空リストの場合は全削除のみ行います。

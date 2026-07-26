@@ -62,6 +62,7 @@ curl -s -c "$COOKIE" -X POST "$BASE_URL/api/login" \
 | `POST /api/login` | ログイン（`{"password":"..."}`） |
 | `POST /api/logout` | ログアウト |
 | `GET /api/bookmarks` | 一覧（`?q=` `?tag=` `?date_from=` `?date_to=` `?page=` `?limit=`） |
+| `GET /api/bookmarks/{id}` | 1件取得（編集前の最新値読込） |
 | `POST /api/bookmarks` | 登録（`{"url","title","excerpt","tags":[{"id":N}]}`） |
 | `PUT /api/bookmarks/{id}` | 更新 |
 | `DELETE /api/bookmarks/{id}` | 単体削除（204） |
@@ -77,6 +78,8 @@ curl -s -c "$COOKIE" -X POST "$BASE_URL/api/login" \
 | `GET /api/export` | Netscape Bookmark形式でエクスポート |
 | `POST /api/import` | インポート（multipart `file=@...`） |
 | `POST /api/fetch-metadata` | OGPメタデータ取得（`{"url":"..."}`） |
+| `GET /api/capabilities` | Henji本文要約の利用可否（`{"henji_summary":true|false}`） |
+| `POST /api/bookmarks/{id}/summary` | 保存済みブックマークの本文要約を非同期開始（202） |
 
 ---
 
@@ -600,6 +603,75 @@ curl -s -o /dev/null -w "Cookie認証(POST): %{http_code}\n" \
   -d '{"url":"https://example.com/e2e-bearer-cookie","title":"Cookie 共存確認"}'
 # => 201 or 409
 ```
+
+---
+
+## シナリオ9: Henji 本文要約【任意・外部provider利用】
+
+保存済みブックマークだけで要約を開始し、Henji未導入時には機能を見せないことを確認します。このシナリオはHenjiとproviderの利用料金が発生し得るため、テスト専用のbookmarkとHenji設定で実行してください。
+
+### 前提条件
+
+- Shirushiを起動するOS userでHenjiが設定済みで、`henji`を実行できること。HenjiのAPIキーやprovider設定はShirushiではなくHenji側で管理します。
+- 外部アクセスできるテスト環境であること。本文成立の例には `https://fil-c.org/`、本文不足の例には `https://sakana.ai/` を使います。
+- ログイン済み（`$COOKIE`取得済み）。
+
+### 操作手順
+
+1. `GET /api/capabilities` が `{"henji_summary":true}` を返すことを確認する。
+2. Fil-Cを保存してIDを控え、`POST /api/bookmarks/{id}/summary` がすぐに`202`を返すことを確認する。
+3. しばらく待ってから一覧を手動で再読み込みし、Excerptが日本語1〜5行・400文字以内に更新されたことを確認する。
+4. bookmarkカードには「AI」が見え、編集モーダルと新規登録モーダルには見えないことを確認する。確認ダイアログを取り消すと、ブラウザのNetworkにsummary POSTが出ないことも確認する。
+5. Sakana AIを保存して開始し、`202`の後もExcerptと`modified_at`が変わらないことを確認する。
+6. Henjiが存在しないパスを`--henji-path`に指定した別プロセスでは、capabilityがfalse、編集モーダルのボタンが非表示、summary POSTが`204`であることを確認する。
+
+### 期待結果
+
+- Fil-C: 開始APIはrunner完了を待たず`202`を返し、成功すれば後の手動再読み込みでExcerptだけが要約へ置き換わる。
+- Sakana AI: 本文候補不足ではHenjiを起動せず、既存Excerptと`modified_at`は不変。
+- 未導入: 利用者向けエラー・stderr表示はなく、通常のブックマーク操作は継続できる。
+- 処理中表示、完了通知、ポーリング、自動再試行、再起動後のジョブ再開はない。同じIDの複数開始は許可され、最後に完了した結果が残る。
+
+### curl 例
+
+```bash
+# 1. Henjiの存在確認。APIキーやprovider到達性までは検査しません。
+curl -s -b "$COOKIE" "$BASE_URL/api/capabilities"
+# => {"henji_summary":true}
+
+# 2. Fil-Cを保存し、要約を非同期開始する
+SUMMARY_ID=$(curl -s -b "$COOKIE" -X POST "$BASE_URL/api/bookmarks" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://fil-c.org/","title":"Fil-C 本文要約E2E","excerpt":"要約前のメモ"}' | jq .id)
+
+curl -s -o /dev/null -w "%{http_code}\n" -b "$COOKIE" \
+  -X POST "$BASE_URL/api/bookmarks/$SUMMARY_ID/summary"
+# => 202
+
+# 完了を通知するAPIはありません。待機後に手動で一覧を取得して確認します。
+curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?q=Fil-C%20%E6%9C%AC%E6%96%87%E8%A6%81%E7%B4%84E2E" \
+  | jq '.bookmarks[0] | {excerpt, modified_at}'
+
+# 5. 本文不足の例。開始は受理されても、Excerptを上書きしません。
+INSUFFICIENT_ID=$(curl -s -b "$COOKIE" -X POST "$BASE_URL/api/bookmarks" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://sakana.ai/","title":"本文不足E2E","excerpt":"保持するメモ"}' | jq .id)
+curl -s -o /dev/null -w "%{http_code}\n" -b "$COOKIE" \
+  -X POST "$BASE_URL/api/bookmarks/$INSUFFICIENT_ID/summary"
+# => 202
+curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?q=%E6%9C%AC%E6%96%87%E4%B8%8D%E8%B6%B3E2E" \
+  | jq '.bookmarks[0] | {excerpt, modified_at}'
+# => excerpt は "保持するメモ" のまま、modified_at も要約開始前から変わらない
+```
+
+### playwright-cli 手順（UI版）
+
+1. Henji利用可のShirushiへログインし、新規登録モーダルと編集モーダルに「AI」がないことを確認する。
+2. Fil-Cを保存し、bookmarkカードに「AI」があることを確認する。
+3. 一度押して標準確認ダイアログを取り消し、Networkに`POST /api/bookmarks/{id}/summary`が出ないことを確認する。
+4. 再度押して承認し、リクエストが一回だけ`202`になることを確認する。モーダルを閉じても構わない。
+5. しばらく待って、ページを再読み込みせずに編集を開き、最新Excerptがフォームに読み込まれることを確認する。その後一覧を手動で再読み込みし、カードにもExcerptが表示されることを確認する。画面内に進捗・完了表示がないことも確認する。
+6. Henji未導入の別プロセスでは編集モーダルにボタンがないことを確認する。
 
 ---
 

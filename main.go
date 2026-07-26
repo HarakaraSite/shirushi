@@ -25,6 +25,12 @@ var staticFiles embed.FS
 
 func main() {
 	var err error
+	// Henjiのprovider/modelは画面や環境変数ではなく、起動時の引数だけで選びます。
+	// これによりAPIキーは引き続きHenjiの設定にだけ置き、Shirushiは扱いません。
+	henjiSummarySettings, err = parseHenjiSummarySettings(os.Args[1:])
+	if err != nil {
+		log.Fatal("Henji本文要約の起動引数エラー:", err)
+	}
 	// 1. データベースファイル（shirushi.db）を開きます。
 	//
 	// SQLite は外部キー制約がデフォルト無効のため、DSN（接続文字列）の
@@ -80,6 +86,7 @@ func main() {
 
 	// ブックマーク関連のAPI
 	http.HandleFunc("GET /api/bookmarks", handleGetBookmarks)
+	http.HandleFunc("GET /api/bookmarks/{id}", handleGetBookmark)
 	http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)
 	http.HandleFunc("DELETE /api/bookmarks/{id}", handleDeleteBookmark)
@@ -99,6 +106,10 @@ func main() {
 
 	// URLからメタデータを取得するAPI
 	http.HandleFunc("POST /api/fetch-metadata", handleFetchMetadata)
+
+	// Henji本文要約（Henji未導入時はcapability=false、開始APIは204）
+	http.HandleFunc("GET /api/capabilities", handleHenjiCapabilities)
+	http.HandleFunc("POST /api/bookmarks/{id}/summary", handleStartBookmarkSummary)
 
 	// インポート・エクスポートAPI
 	http.HandleFunc("GET /api/export", handleExport)

@@ -142,6 +142,27 @@ number of pagination pages. Untagged bookmarks have `"tags": []`, never `null`.
 
 ---
 
+### Get one bookmark
+
+```
+GET /api/bookmarks/{id}
+```
+
+Returns one bookmark, including its tags. The Web UI calls this immediately before opening the edit dialog, so an Excerpt updated by a completed asynchronous Henji summary is shown even when the page itself has not been reloaded.
+
+**Response** `200 OK`
+
+Returns the same bookmark JSON as the create and update endpoints.
+
+**Errors**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | `{id}` is not an integer. |
+| `404` | The specified ID does not exist. |
+
+---
+
 ### Create a bookmark
 
 ```
@@ -494,6 +515,52 @@ bookmark.
 |--------|---------|
 | `400` | Empty URL, or a scheme other than `http`/`https` |
 | `502` | Could not access the external URL (timeout, SSRF block, non-HTML response, etc.) |
+
+---
+
+## Henji article summaries
+
+Henji is an optional external runtime dependency. Shirushi does not manage Henji API keys or configuration: it only uses the executable selected at startup (by default, `henji` on `PATH`). The summary button is hidden in the Web UI when Henji is unavailable.
+
+### Availability
+
+```
+GET /api/capabilities
+```
+
+**Response** `200 OK`
+
+```json
+{ "henji_summary": true }
+```
+
+`henji_summary` is `true` only when the Henji executable selected at startup can be found through `PATH` lookup or an explicit path. This endpoint does not validate API keys or provider connectivity.
+
+---
+
+### Start a summary
+
+```
+POST /api/bookmarks/{id}/summary
+```
+
+Fetches static HTML from the saved bookmark URL and starts a Henji summary job only when a sufficient article candidate is found. No request body is required. Unsaved URL or excerpt values in the edit dialog are never used.
+
+**Response** `202 Accepted`
+
+The job runs asynchronously after the response. Only a successful job updates `excerpt` and `modified_at`. A summary must be Japanese, one to five lines, at most 400 Unicode characters, and is accepted only from the JSON `summary` field.
+
+Multiple starts for the same bookmark are allowed; the summary that completes last remains. If the candidate is insufficient, URL retrieval fails, Henji fails, or JSON validation fails, the existing excerpt is unchanged. There is no progress endpoint, completion notification, polling, retry, or recovery of jobs after restart. Henji stderr and provider details are not included in responses.
+
+**Other responses**
+
+| Status | Meaning |
+|--------|---------|
+| `204 No Content` | The Henji executable is unavailable. No job, URL retrieval, or database update occurs. |
+| `400 Bad Request` | `{id}` is not an integer. |
+| `404 Not Found` | The specified bookmark does not exist. |
+
+Candidates are extracted from static HTML only while retaining the existing SSRF protection. Shirushi does not execute JavaScript, launch a headless browser, or retrieve authenticated pages. The normal extraction limit is 40,000 Unicode characters, while the actual Henji input fits a UTF-8-byte budget calculated from the selected model's `max-input-chars` after the fixed instruction, JSON Schema, framing, and safety margin are reserved.
 
 ---
 

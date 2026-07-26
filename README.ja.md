@@ -24,6 +24,7 @@ Caddy 経由で外出先からも使えます。
 - Netscape Bookmark 形式（Chrome/Firefox のエクスポート形式）でインポート・エクスポート
 - パスワード認証（シングルユーザー、30日間のログイン維持に対応）
 - Bearer トークン認証（ブラウザ拡張などのAPIクライアント向け）
+- 任意のHenji連携による、保存済みブックマーク本文の日本語要約
 - ダークテーマ固定
 
 ---
@@ -55,6 +56,17 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 ブラウザで `http://localhost:8181` を開いてください。
 
 `SHIRUSHI_PASSWORD` が未設定の場合は起動時にエラーになります。
+
+### 任意: Henji による本文要約
+
+Shirushi v1.0.0では、保存済みブックマークの静的HTMLを[Henji](https://forge.harakara.site/littleisland/henji)を通じて生成AIモデルで日本語要約できます。Henjiは任意の外部コマンドです。providerの認証情報をHenji側で設定したうえで、ShirushiはPATH上の`henji`（または`--henji-path`で指定したパス）を使います。Henjiが見つからない場合はカードの「AI」ボタンを表示せず、通常のブックマーク機能はそのまま使えます。
+
+設定方法、起動引数、安全性の境界、上限、非同期UIの仕様は[Henji本文要約](docs/henji-summary.ja.md)を参照してください。ShirushiはHenjiのAPIキーやprovider設定画面を持ちません。
+
+```bash
+# PATH上のhenjiを使う
+SHIRUSHI_PASSWORD='yourpassword' ./shirushi
+```
 
 ---
 
@@ -143,6 +155,7 @@ go test -v -cover ./...
 - **シングルユーザーのみ**: 複数アカウントには対応していません
 - **セッションはメモリ管理**: サーバーを再起動するとログアウト状態になります
 - **インポート時のサムネイル取得は非同期**: Netscape Bookmark 形式でインポートした場合、OG 画像はバックグラウンドで順次取得されます。件数が多い場合はしばらく待ってからリロードしてください
+- **Henji要約は非同期・無通知**: 開始後の進捗や完了は画面に表示しません。要約結果は後で一覧を再読み込みして確認してください
 - **アーカイブ機能なし**: ページのオフラインコピーは作成しません
 
 ---
@@ -163,3 +176,7 @@ go test -v -cover ./...
 ## ライセンス
 
 [MIT](LICENSE)
+
+## 変更履歴
+
+[CHANGELOG.ja.md](CHANGELOG.ja.md)

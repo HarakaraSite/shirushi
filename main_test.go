@@ -342,6 +342,57 @@ func TestHandleCreateBookmark_TooLargeJSON(t *testing.T) {
 	}
 }
 
+// TestHandleGetBookmark_ReturnsCurrentExcerpt：編集を開く直前に、DBの最新Excerptを1件取得できるか確認します。
+func TestHandleGetBookmark_ReturnsCurrentExcerpt(t *testing.T) {
+	setupTestDB(t)
+
+	result, err := db.Exec(`INSERT INTO bookmarks (url, title, excerpt) VALUES (?, ?, ?)`,
+		"https://example.com/latest", "最新値", "Henjiが更新した要約")
+	if err != nil {
+		t.Fatalf("テストデータ挿入エラー: %v", err)
+	}
+	id, _ := result.LastInsertId()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/bookmarks/%d", id), nil)
+	r.SetPathValue("id", fmt.Sprintf("%d", id))
+	handleGetBookmark(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ステータスコードが違います: got %d, want %d", w.Code, http.StatusOK)
+	}
+	var got Bookmark
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("JSONの解析に失敗しました: %v", err)
+	}
+	if got.ID != int(id) || got.Excerpt != "Henjiが更新した要約" {
+		t.Fatalf("最新bookmarkが返っていません: %#v", got)
+	}
+}
+
+func TestHandleGetBookmark_InvalidOrMissing(t *testing.T) {
+	setupTestDB(t)
+
+	for _, tt := range []struct {
+		name string
+		id   string
+		want int
+	}{
+		{name: "invalid", id: "not-a-number", want: http.StatusBadRequest},
+		{name: "missing", id: "999", want: http.StatusNotFound},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/api/bookmarks/"+tt.id, nil)
+			r.SetPathValue("id", tt.id)
+			handleGetBookmark(w, r)
+			if w.Code != tt.want {
+				t.Fatalf("ステータスコードが違います: got %d, want %d", w.Code, tt.want)
+			}
+		})
+	}
+}
+
 // TestHandleUpdateBookmark_Success：存在するIDを正しいJSONで更新すると200が返るかテストします。
 func TestHandleUpdateBookmark_Success(t *testing.T) {
 	setupTestDB(t)

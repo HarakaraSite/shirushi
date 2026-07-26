@@ -26,6 +26,7 @@ Alpine Linux) and be accessed remotely through Caddy.
 - Import and export Netscape Bookmark files (the format exported by Chrome and Firefox)
 - Password authentication for one user, with optional 30-day persistent login
 - Bearer token authentication for API clients such as browser extensions
+- Optional Japanese article summaries for saved bookmarks through Henji
 - A fixed dark theme
 
 ---
@@ -58,6 +59,17 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 Then open `http://localhost:8181` in a browser.
 
 Shirushi exits with an error if `SHIRUSHI_PASSWORD` is not set.
+
+### Optional: article summaries with Henji
+
+Shirushi v1.0.0 can summarize the static HTML of a saved bookmark in Japanese with a generative AI model through [Henji](https://forge.harakara.site/littleisland/henji). Henji is an optional external command: configure its provider credentials separately, then Shirushi uses `henji` on `PATH` (or a path supplied with `--henji-path`). If it is unavailable, the **AI** button is hidden and the rest of Shirushi works normally.
+
+For setup, startup options, security boundaries, limits, and the asynchronous UI behavior, see [Henji article summaries](docs/henji-summary.md). Shirushi never stores Henji API keys or provides a provider settings screen.
+
+```bash
+# Use henji on PATH
+SHIRUSHI_PASSWORD='yourpassword' ./shirushi
+```
 
 ---
 
@@ -149,6 +161,7 @@ go test -v -cover ./...
 - **Single user only**: Multiple accounts are not supported.
 - **Sessions are kept in memory**: Restarting the server signs users out.
 - **Thumbnail fetching after imports is asynchronous**: After importing a Netscape Bookmark file, OGP images are fetched in the background. For large imports, wait a while and reload the page.
+- **Henji summaries are asynchronous and silent**: The UI does not show progress or completion. Reload the list later to see a completed summary.
 - **No archiving**: Shirushi does not make offline copies of pages.
 
 ---
@@ -169,3 +182,7 @@ The canonical repository is [forge.harakara.site/littleisland/shirushi](https://
 ## License
 
 [MIT](LICENSE)
+
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md)

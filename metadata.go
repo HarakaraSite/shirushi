@@ -11,6 +11,7 @@ import (
 	"io"            // レスポンスボディを読み取るパッケージ
 	"net"           // IPアドレスの判定・DNS解決・接続に使うパッケージ
 	"net/http"      // HTTPリクエストの送信・ハンドラに使うパッケージ
+	"net/url"       // リダイレクト後のURLを画像URLの解決に使うパッケージ
 	"os"            // 環境変数を読み取るパッケージ
 	"regexp"        // HTMLのメタタグを正規表現で抽出するパッケージ
 	"strings"       // Content-Type 判定・テキスト処理に使うパッケージ
@@ -84,6 +85,32 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 
 // fetchMetadata：URLにHTTPアクセスしてHTMLからメタデータを抽出する関数です。
 func fetchMetadata(url string) (*Metadata, error) {
+	html, responseURL, err := fetchHTML(url, 1024*1024)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := &Metadata{}
+	// OGタグを優先し、なければ通常のメタタグ・titleタグを使います。
+	meta.Title = firstNonEmpty(extractOGTag(html, "og:title"), extractTitle(html))
+	meta.Excerpt = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
+	meta.Author = firstNonEmpty(extractOGTag(html, "og:author"), extractMetaTag(html, "author"))
+	// og:image は相対URLで返すサイトがあるため、リクエスト先URLを基準に絶対URL化します。
+	// 例: "/og.png" → "https://example.com/og.png"
+	// http/https 以外（data: URI 等）は保存しません。
+	if raw := extractOGTag(html, "og:image"); raw != "" {
+		if abs, err := responseURL.Parse(raw); err == nil &&
+			(abs.Scheme == "http" || abs.Scheme == "https") {
+			meta.ImageURL = abs.String()
+		}
+	}
+
+	return meta, nil
+}
+
+// fetchHTML：既存のSSRF対策を保ったまま、指定サイズまでHTMLを取得します。
+// metadata と本文抽出で同じ取得境界を使うため、HTTP通信の処理をここへ集約します。
+func fetchHTML(rawURL string, maxBytes int64) (string, *url.URL, error) {
 	// 10秒でタイムアウトするHTTPクライアントを作ります。
 	// デフォルトのクライアントはタイムアウトがないため、自前で設定するのが定石です。
 	client := &http.Client{
@@ -106,52 +133,35 @@ func fetchMetadata(url string) (*Metadata, error) {
 		client.Transport = &http.Transport{DialContext: safeDialContext}
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	// User-Agentを設定しないとアクセスを弾くサイトがあるため設定します。
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Shirushi/1.0)")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTPステータスがエラーです: %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("HTTPステータスがエラーです: %d", resp.StatusCode)
 	}
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if contentType != "" &&
 		!strings.Contains(contentType, "text/html") &&
 		!strings.Contains(contentType, "application/xhtml+xml") {
-		return nil, errors.New("HTMLではないレスポンスです")
+		return "", nil, errors.New("HTMLではないレスポンスです")
 	}
 
 	// HTMLが大きいサイトでも安全に処理できるよう、最大1MBだけ読み込みます。
 	// メタタグは通常 <head> 内にあるので先頭部分で十分です。
-	limitedBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	limitedBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	html := string(limitedBody)
-
-	meta := &Metadata{}
-	// OGタグを優先し、なければ通常のメタタグ・titleタグを使います。
-	meta.Title = firstNonEmpty(extractOGTag(html, "og:title"), extractTitle(html))
-	meta.Excerpt = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
-	meta.Author = firstNonEmpty(extractOGTag(html, "og:author"), extractMetaTag(html, "author"))
-	// og:image は相対URLで返すサイトがあるため、リクエスト先URLを基準に絶対URL化します。
-	// 例: "/og.png" → "https://example.com/og.png"
-	// http/https 以外（data: URI 等）は保存しません。
-	if raw := extractOGTag(html, "og:image"); raw != "" {
-		if abs, err := resp.Request.URL.Parse(raw); err == nil &&
-			(abs.Scheme == "http" || abs.Scheme == "https") {
-			meta.ImageURL = abs.String()
-		}
-	}
-
-	return meta, nil
+	return string(limitedBody), resp.Request.URL, nil
 }
 
 // extractTitle：HTMLの <title> タグからテキストを取り出します。
