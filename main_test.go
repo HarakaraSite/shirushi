@@ -393,6 +393,98 @@ func TestHandleGetBookmark_InvalidOrMissing(t *testing.T) {
 	}
 }
 
+// TestHandleGetBookmarkByURL：拡張向けのURL完全一致検索が、登録済みbookmarkとタグを返すか確認します。
+func TestHandleGetBookmarkByURL(t *testing.T) {
+	setupTestDB(t)
+
+	bookmarkID := createTestBookmark(t, "https://example.com/article")
+	tagID := createTestTag(t, "go")
+	if _, err := db.Exec(`INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)`, bookmarkID, tagID); err != nil {
+		t.Fatalf("テスト用タグ紐付け作成エラー: %v", err)
+	}
+	// URLだけが含まれる別bookmarkを作り、部分一致検索へ後退していないことも確認します。
+	createTestBookmark(t, "https://example.com/other?ref=https://example.com/article")
+
+	w := httptest.NewRecorder()
+	// 大文字ホストと既定HTTPSポートを、保存時と同じ正規化で一致させます。
+	r := httptest.NewRequest(http.MethodGet, "/api/bookmarks/by-url?url=https%3A%2F%2FEXAMPLE.com%3A443%2Farticle", nil)
+	handleGetBookmarkByURL(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ステータスコードが違います: got %d, want %d", w.Code, http.StatusOK)
+	}
+	var got Bookmark
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("JSONの解析に失敗しました: %v", err)
+	}
+	if got.ID != bookmarkID || got.URL != "https://example.com/article" {
+		t.Fatalf("完全一致のbookmarkが返っていません: %#v", got)
+	}
+	if len(got.Tags) != 1 || got.Tags[0].Name != "go" {
+		t.Fatalf("タグ込みのbookmarkが返っていません: %#v", got.Tags)
+	}
+}
+
+// TestHandleGetBookmarkByURL_InvalidOrMissing：入力不正は400、未登録URLは404で返すか確認します。
+func TestHandleGetBookmarkByURL_InvalidOrMissing(t *testing.T) {
+	setupTestDB(t)
+
+	for _, tt := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{name: "URL未指定", path: "/api/bookmarks/by-url", want: http.StatusBadRequest},
+		{name: "非HTTPURL", path: "/api/bookmarks/by-url?url=ftp%3A%2F%2Fexample.com", want: http.StatusBadRequest},
+		{name: "未登録", path: "/api/bookmarks/by-url?url=https%3A%2F%2Fexample.com%2Fnot-saved", want: http.StatusNotFound},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			handleGetBookmarkByURL(w, r)
+			if w.Code != tt.want {
+				t.Fatalf("ステータスコードが違います: got %d, want %d", w.Code, tt.want)
+			}
+		})
+	}
+}
+
+// TestBookmarkByURLRouteAndBearerAuth：固定パスが {id} へ誤ルーティングせず、
+// 既存の認証ミドルウェアを通じてBearer認証が使えることを確認します。
+func TestBookmarkByURLRouteAndBearerAuth(t *testing.T) {
+	setupTestDB(t)
+	createTestBookmark(t, "https://example.com/article")
+
+	// main.go と同じ2ルートを小さなServeMuxへ登録します。
+	// /by-url が {id} より具体的な固定パスとして選ばれることをHTTP経由で確認します。
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/bookmarks/by-url", handleGetBookmarkByURL)
+	mux.HandleFunc("GET /api/bookmarks/{id}", handleGetBookmark)
+	handler := authMiddleware(mux)
+
+	oldAPIToken := apiToken
+	apiToken = "test-api-token"
+	t.Cleanup(func() { apiToken = oldAPIToken })
+
+	path := "/api/bookmarks/by-url?url=https%3A%2F%2Fexample.com%2Farticle"
+
+	// 認証なしでは、ハンドラへ届く前に401になります。
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("未認証のステータスコードが違います: got %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	// 正しいBearerトークンなら、固定パスのハンドラが200を返します。
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer test-api-token")
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Bearer認証時のステータスコードが違います: got %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
 // TestHandleUpdateBookmark_Success：存在するIDを正しいJSONで更新すると200が返るかテストします。
 func TestHandleUpdateBookmark_Success(t *testing.T) {
 	setupTestDB(t)

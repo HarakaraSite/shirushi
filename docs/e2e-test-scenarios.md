@@ -62,6 +62,7 @@ curl -s -c "$COOKIE" -X POST "$BASE_URL/api/login" \
 | `POST /api/login` | ログイン（`{"password":"..."}`） |
 | `POST /api/logout` | ログアウト |
 | `GET /api/bookmarks` | 一覧（`?q=` `?tag=` `?date_from=` `?date_to=` `?page=` `?limit=`） |
+| `GET /api/bookmarks/by-url` | URL完全一致で1件取得（`?url=`、拡張の登録済み判定向け） |
 | `GET /api/bookmarks/{id}` | 1件取得（編集前の最新値読込） |
 | `POST /api/bookmarks` | 登録（`{"url","title","excerpt","tags":[{"id":N}]}`） |
 | `PUT /api/bookmarks/{id}` | 更新 |

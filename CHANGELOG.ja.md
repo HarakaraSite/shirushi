@@ -2,6 +2,12 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md)
 
+## 1.1.0
+
+### 追加
+
+- ブラウザ拡張などのAPIクライアントが、正規化後のURL完全一致で保存済みbookmarkを取得できる`GET /api/bookmarks/by-url`。
+
 ## 1.0.0
 
 ### 追加

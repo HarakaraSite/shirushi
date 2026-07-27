@@ -162,6 +162,27 @@ GET /api/bookmarks/{id}
 
 ---
 
+### URLで1件取得
+
+```
+GET /api/bookmarks/by-url?url=<percent-encoded URL>
+```
+
+保存済みURLを完全一致で検索します。URLはbookmarkの登録・更新時と同じ規則で検証・正規化してから比較します。ブラウザ拡張など、現在のページが登録済みかを判定するクライアント向けです。
+
+**レスポンス** `200 OK`
+
+`GET /api/bookmarks/{id}` と同じ、タグを含むbookmark JSONを返します。
+
+**エラー**
+
+| ステータス | 内容 |
+|-----------|------|
+| `400` | `url` が未指定、または有効な絶対HTTP/HTTPS URLではない |
+| `404` | 正規化後のURLに一致するbookmarkがない |
+
+---
+
 ### 作成
 
 ```

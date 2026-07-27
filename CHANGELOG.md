@@ -2,6 +2,12 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.1.0
+
+### Added
+
+- `GET /api/bookmarks/by-url` for browser extensions and other API clients to look up a saved bookmark by its normalized, exact URL.
+
 ## 1.0.0
 
 ### Added

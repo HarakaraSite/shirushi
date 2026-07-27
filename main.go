@@ -86,6 +86,9 @@ func main() {
 
 	// ブックマーク関連のAPI
 	http.HandleFunc("GET /api/bookmarks", handleGetBookmarks)
+	// 固定パスを先に登録し、拡張がURLの完全一致で保存済みbookmarkを確認できるようにします。
+	// GoのServeMuxは固定パスを {id} より優先して選ぶため、両方を安全に共存させられます。
+	http.HandleFunc("GET /api/bookmarks/by-url", handleGetBookmarkByURL)
 	http.HandleFunc("GET /api/bookmarks/{id}", handleGetBookmark)
 	http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)

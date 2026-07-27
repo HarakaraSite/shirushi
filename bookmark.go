@@ -4,6 +4,7 @@ package main
 // タグとの紐付けヘルパー（syncBookmarkTags, getTagsByBookmarkID, getBookmarkByID）も含みます。
 
 import (
+	"database/sql"  // sql.ErrNoRows で未登録URLを404と区別するために使うパッケージ
 	"encoding/json" // レスポンスをJSON形式で返すパッケージ
 	"fmt"           // SQLのプレースホルダー生成・エラーメッセージに使うパッケージ
 	"net/http"      // HTTPハンドラ・エラーレスポンスに使うパッケージ
@@ -253,6 +254,38 @@ func handleGetBookmark(w http.ResponseWriter, r *http.Request) {
 	bookmark, err := getBookmarkByID(id)
 	if err != nil {
 		http.Error(w, "指定されたIDが見つかりません", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bookmark)
+}
+
+// handleGetBookmarkByURL：登録済みURLを完全一致で検索し、タグ込みのbookmarkを1件返します。
+// 拡張が現在開いているページの登録状態を確認するために使います。部分一致検索ではなく、
+// 登録・更新と同じ validateHTTPURL による正規化後のURLだけを比較します。
+func handleGetBookmarkByURL(w http.ResponseWriter, r *http.Request) {
+	validatedURL, err := validateHTTPURL(r.URL.Query().Get("url"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// URL列はUNIQUE制約なので、IDは最大1件だけ取得できます。
+	var id int
+	err = db.QueryRow(`SELECT id FROM bookmarks WHERE url = ?`, validatedURL).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "指定されたURLのbookmarkが見つかりません", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "データベースエラー", http.StatusInternalServerError)
+		return
+	}
+
+	// 既存の1件取得ヘルパーを使うことで、ID指定APIと同じBookmark JSON（タグを含む）を返します。
+	bookmark, err := getBookmarkByID(id)
+	if err != nil {
+		http.Error(w, "データベースエラー", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

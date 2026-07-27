@@ -1,28 +1,28 @@
-# shirushi 本体 改修要件（ブラウザ拡張対応）
+# shirushi 本体の拡張 API 要件（v1 完了・v2 将来項目）
 
-Firefox 拡張（別オリジンのクライアント）から `POST /api/bookmarks` 等を叩けるようにするための本体改修要件。
+Firefox 拡張（別オリジンのクライアント）と連携するための本体 API 要件。v1 の Bearer 認証は Shirushi v1.0.0 で実装・公開済みであり、以下では現行仕様として記録する。
 
 - 対象リポジトリ: shirushi（Go）
-- 関連: 認証は現状セッション Cookie のみ（`SameSite=Strict`）で別オリジン不可
+- 関連: 認証はセッション Cookie または `SHIRUSHI_API_TOKEN` による Bearer。拡張は background 経由で通信する
 - 運用: 本番 `https://shirushi.harakara.site`、開発 `http://localhost:8181`
 - 前提: シングルユーザー構成
 
 ---
 
-## v1（今回の改修スコープ）
+## v1（完了済み・現行仕様）
 
-### Bearer トークン認証の追加 ★これだけ
+### Bearer トークン認証（実装・公開済み）
 
-別オリジンの拡張から認証を通すため、Bearer トークン認証を追加する。CORS 改修は不要（拡張は background 経由で fetch するため、`host_permissions` で CORS をバイパスできる）。
+別オリジンの拡張から認証を通すため、Bearer トークン認証を実装した。CORS 改修は不要である（拡張は background 経由で fetch し、`host_permissions` により通信する）。
 
-#### 現状
+#### 実装済みの仕様
 
 - `authMiddleware` が全 API リクエストに適用（例外は `/api/login`・`/api/logout`・静的ファイル）
-- 認証方式はセッション Cookie 一本。`SameSite=Strict` のため別オリジンの POST に Cookie が乗らず、拡張からは通過できない
+- 有効なセッション Cookie または一致する Bearer トークンで認証する。`SameSite=Strict` の Cookie に依存せず、拡張から API を利用できる
 
-#### 変更内容
+#### 認証仕様
 
-`authMiddleware` を「**セッション Cookie が有効、または Bearer トークンが一致**」のどちらかで通すよう拡張する。
+`authMiddleware` は「**セッション Cookie が有効、または Bearer トークンが一致**」のどちらかで通過させる。
 
 - トークンは環境変数 `SHIRUSHI_API_TOKEN` から読む
 - リクエストの `Authorization: Bearer <token>` ヘッダと比較
@@ -69,11 +69,11 @@ authMiddleware:
 #### トークン未設定時の挙動
 
 - `SHIRUSHI_API_TOKEN` が空の場合は Bearer 認証を無効化（Cookie 認証のみで従来通り動作）
-- 起動時にログで「Bearer 認証は無効（SHIRUSHI_API_TOKEN 未設定）」と警告を出すと親切
+- 起動時にログで「Bearer 認証は無効（SHIRUSHI_API_TOKEN 未設定）」と警告を出す
 
 #### 適用範囲
 
-- 現在 Cookie 認証が必要な全エンドポイントが、同様に Bearer でも通るようにする（`authMiddleware` の拡張なので自動的にそうなるはず）
+- Cookie 認証が必要な全エンドポイントは、同様に Bearer でも通る（`authMiddleware` による共通認証）
 - `/api/login`・`/api/logout` は対象外（従来通り）
 
 #### レートリミットについて（やらないことの明記）
@@ -87,7 +87,7 @@ authMiddleware:
 - **CORS ミドルウェアは追加しない**。拡張は popup から直接 fetch せず、background(event page) 経由で fetch する設計のため、`host_permissions` 宣言で CORS をバイパスできる
 - 将来 Vue+REST API 化で dev server（別オリジン）から叩く段になったら、その時に CORS を追加する
 
-#### 受け入れ条件
+#### 確認済みの受け入れ条件
 
 ```bash
 # Bearer トークンで登録できること
@@ -114,7 +114,7 @@ curl -X POST https://shirushi.harakara.site/api/bookmarks \
 
 拡張の UX 向上と引き換えに本体改修が必要になる項目。v1 が安定してから着手する。
 
-### 1. タグ名でのブックマーク登録対応（A1 方式）
+### 1. タグ名でのブックマーク登録対応（A1 方式、保留）
 
 現状 `POST /api/bookmarks` の `tags` は既存タグの ID 指定のみ（`[{"id":3}]`）。これを **タグ名指定**（`[{"name":"go"}]`）でも受け付け、サーバー側で「既存マッチ or 自動作成」して紐付けるようにする。
 
@@ -122,22 +122,65 @@ curl -X POST https://shirushi.harakara.site/api/bookmarks \
 - ID 指定と名前指定の混在も許容できると望ましい
 - メリット: 拡張が `POST /api/tags` を事前に叩いて ID 解決する必要がなくなり、登録が 1 リクエストで原子的に完結する
 - 注: `POST /api/tags` は既に冪等（同名なら既存タグを返す）なので、v1 ではこの機能を**拡張側**で代替している（下記 extension 要件の A2 方式）
+- 現在の拡張は既存タグの選択・新規タグ作成を問題なく行えているため、この本体改修は保留する
 
-### 2. 登録済み判定エンドポイント（アイコンバッジ用）
+### 2. URL 完全一致の 1 件取得 API（拡張の登録状態・カード表示用）
 
-拡張のツールバーアイコンに「このページは登録済み」を表示する機能（v2）のために、URL 完全一致で登録有無を返す軽量エンドポイントを追加する。
+Firefox 拡張が、現在開いているページの登録有無を判定し、保存済みならタイトル・メモ・タグを表示できるようにする。URL で完全一致するブックマークを 1 件取得する読み取り専用 API を追加する。
 
 ```
-GET /api/bookmarks/exists?url=<URL>
-→ 200 OK { "exists": true, "id": 42 }
-       { "exists": false }
+GET /api/bookmarks/by-url?url=<percent-encoded URL>
 ```
 
-- 既存の `GET /api/bookmarks?q=` は**部分一致検索**のため誤判定する。専用に **URL 完全一致**（正規化込み）で boolean を返すエンドポイントを作る
-- URL 正規化（末尾スラッシュ、`utm_*` 等のクエリ除去の方針）をどうするかは別途設計
-- このエンドポイントは全タブで頻繁に呼ばれるため軽量に保つ
-- **注意: v0.4.0 で `validateHTTPURL` にホスト名小文字化・デフォルトポート除去の正規化を追加した。
-  exists の「正規化込みで完全一致」を実装する際、それ以前に保存された URL（正規化前）との
-  不一致が発生する可能性がある。v2 着手時にデータマイグレーションの要否を検討すること。**
+#### レスポンス
 
-> v2 の本体改修は「タグ名対応」と「exists エンドポイント」をまとめて 1 回で入れると効率が良い。
+- 登録済み: `200 OK` と既存の `GET /api/bookmarks/{id}` と同一の `Bookmark` JSON を返す。`id`、`url`、`title`、`excerpt`、`tags` などを含む
+- 未登録: `404 Not Found`。`exists: false` のような別レスポンスは設けない
+- `url` が未指定、空、または `http`/`https` の絶対 URL として不正: `400 Bad Request`
+- 認証なし・不正な Bearer トークン: 既存の認証ミドルウェアにより `401 Unauthorized`
+
+#### URL の一致規則
+
+- クエリの `url` は、登録・更新時と同じ `validateHTTPURL` を必ず通す
+- 正規化後の文字列を `bookmarks.url` と `=` で比較する。部分一致の `LIKE`、タイトル・メモ・タグの検索は行わない
+- 既存の `url` 列の `UNIQUE` 制約を利用し、該当カードは高々 1 件とする。スキーマ変更や新規インデックスは不要
+- この改修では末尾スラッシュの追加・除去、`utm_*` などのクエリ除去、フラグメントの除去といった新しい正規化は追加しない。保存時と同じ「ホスト名小文字化・デフォルトポート除去」のみを適用する
+- **注意:** `validateHTTPURL` の正規化導入前に保存した URL は、正規化後の検索文字列と一致しない可能性がある。実装前に既存 DB の該当データを調査し、必要なら個別のデータ移行を別作業として行う
+
+#### 実装方針
+
+- `main.go` に `GET /api/bookmarks/by-url` を登録する。`GET /api/bookmarks/{id}` と共存できる固定パスを使う
+- URL で ID を 1 件取得した後、既存の `getBookmarkByID` を再利用してタグを含む `Bookmark` を返す。既存の ID 指定 1 件取得とレスポンス内容を分岐させない
+- URL、認証ヘッダ、トークンをアプリケーションログに出力しない
+- `GET /api/bookmarks?q=` は保存済みブックマークのキーワード検索・一覧表示に引き続き使う。この API で代替しない
+
+#### 受け入れ条件
+
+```bash
+# 登録済み URL はタグを含むカードを 1 件返す
+curl -sS -H "Authorization: Bearer $SHIRUSHI_API_TOKEN" \
+  --get --data-urlencode 'url=https://example.com/article' \
+  https://shirushi.harakara.site/api/bookmarks/by-url
+# → 200。JSON の url は https://example.com/article、tags は [] またはタグ配列
+
+# 未登録 URL は 404
+curl -o /dev/null -sS -w '%{http_code}\n' \
+  -H "Authorization: Bearer $SHIRUSHI_API_TOKEN" \
+  --get --data-urlencode 'url=https://example.com/not-saved' \
+  https://shirushi.harakara.site/api/bookmarks/by-url
+# → 404
+
+# 不正 URL は 400、トークンなしは 401
+```
+
+- `https://EXAMPLE.com:443/article` の検索が、`https://example.com/article` として保存したカードを返すことを単体テストで確認する
+- URL がメモやタイトルに含まれる別カードがあっても、そのカードを返さないことを単体テストで確認する
+- 既存の `GET /api/bookmarks/{id}`、`GET /api/bookmarks?q=`、Cookie 認証、Bearer 認証の挙動を変えない
+
+#### 今回は行わないこと
+
+- 拡張のアイコン切替・保存済みカード表示 UI の実装
+- 登録済み URL の全件一覧 API、クライアント側の全件キャッシュ、オフライン同期
+- URL 正規化ポリシーの拡張と既存データの一括書き換え
+
+> タグ名対応は保留する。URL 完全一致の1件取得 API は、拡張の登録状態・カード表示に必要になった時点で個別に実装する。

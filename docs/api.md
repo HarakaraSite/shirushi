@@ -163,6 +163,30 @@ Returns the same bookmark JSON as the create and update endpoints.
 
 ---
 
+### Get one bookmark by URL
+
+```
+GET /api/bookmarks/by-url?url=<percent-encoded URL>
+```
+
+Looks up a saved bookmark by its URL. The URL is validated and normalized with
+the same rules as bookmark creation and update, then compared as an exact
+match. This is intended for clients, such as browser extensions, that need to
+determine whether the current page is already saved.
+
+**Response** `200 OK`
+
+Returns the same tag-inclusive bookmark JSON as `GET /api/bookmarks/{id}`.
+
+**Errors**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | `url` is missing or is not a valid absolute HTTP/HTTPS URL. |
+| `404` | No bookmark has the normalized URL. |
+
+---
+
 ### Create a bookmark
 
 ```
