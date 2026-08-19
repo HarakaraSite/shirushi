@@ -375,3 +375,11 @@
 - 実施: 通常test、vet、staticcheck、4対象のCGOなしbuildとchecksum、提供11 URLのlive判定、managed Chromiumの404チェックE2Eに成功した。
 - 次: release差分をcommit・pushし、annotated tag `v1.2.1`を公開してForgejo Actionsとassetを確認する。
 - 注意: 利用者判断によりrace testは選択していない。既存のUI多言語化メモcommit `71c23d1`もmainへpushされる。
+
+## 2026-08-19 18:44 JST
+
+- 実行エージェント: Codex
+- 作業トピック: Shirushi v1.2.1 リリース完了
+- 実施: release commit `5a84952`とannotated tag `v1.2.1`を公開した。Forgejo Actions run #30の成功と4バイナリ＋`SHA256SUMS`を確認し、公開assetを再ダウンロードして全checksumを検証した。
+- 次: なし
+- 注意: v1.2.1 tagは`5a84952`を指す。release後の証跡更新はmain上の追跡commitとして記録する。

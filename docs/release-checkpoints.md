@@ -11,8 +11,8 @@
 | Provided live URL set | passed | two non-404 URLs returned 200 and nine expected 404 URLs returned 404 with the production `Accept` header |
 | 404-check browser E2E | passed | `ai-dev` managed headless Chromium: running progress/disabled button, completion, `/404.svg`, `modified_at`, completed counters, and zero authenticated-page console errors verified |
 | Race test | not selected | C compiler is not installed in `ai-dev`; user approved release without race |
-| Forgejo release workflow | pending | tag-triggered native Actions log |
-| Four binaries and `SHA256SUMS` | pending | public Forgejo Release assets |
+| Forgejo release workflow | passed | [run #30](https://forge.harakara.site/littleisland/shirushi/actions/runs/30) completed successfully for tag `v1.2.1` |
+| Four binaries and `SHA256SUMS` | passed | [v1.2.1 release](https://forge.harakara.site/littleisland/shirushi/releases/tag/v1.2.1); all downloaded binaries passed `sha256sum -c SHA256SUMS` |
 
 ## v1.2.0 — 2026-08-19
 
