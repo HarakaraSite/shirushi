@@ -14,6 +14,9 @@ const (
 	notFoundThumbnailURL = "/404.svg"
 	// maxStatusCheckWorkers：同時アクセス数を抑え、相手サイトとShirushiの負荷を制限します。
 	maxStatusCheckWorkers = 5
+	// htmlDocumentAccept：通常のブラウザと同様にHTMLページを要求していることを接続先へ伝えます。
+	// Acceptがない機械的なGETへ404を返すサイトで、存在するページを誤判定しないために使います。
+	htmlDocumentAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
 	bookmark404JobIdle      = "idle"
 	bookmark404JobRunning   = "running"
@@ -206,6 +209,7 @@ func checkBookmarkURLs(ctx context.Context, targets []bookmarkURLCheck) <-chan b
 					continue
 				}
 				req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Shirushi/1.0)")
+				req.Header.Set("Accept", htmlDocumentAccept)
 				resp, err := client.Do(req)
 				if err != nil {
 					results <- bookmarkURLCheckResult{ID: target.ID, URL: target.URL, CheckFail: true}

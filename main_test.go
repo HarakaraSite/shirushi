@@ -260,6 +260,13 @@ func TestHandleBookmark404CheckAsync(t *testing.T) {
 			http.NotFound(w, r)
 		case "/server-error":
 			http.Error(w, "error", http.StatusInternalServerError)
+		case "/requires-html-accept":
+			// crates.ioなど、HTMLを要求しないGETへ404を返すサイトの挙動を再現します。
+			if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
@@ -270,7 +277,8 @@ func TestHandleBookmark404CheckAsync(t *testing.T) {
 	staleMissingID := createTestBookmark(t, server.URL+"/stale-missing")
 	okID := createTestBookmark(t, server.URL+"/ok")
 	errorID := createTestBookmark(t, server.URL+"/server-error")
-	for _, id := range []int{missingID, staleMissingID, okID, errorID} {
+	htmlAcceptID := createTestBookmark(t, server.URL+"/requires-html-accept")
+	for _, id := range []int{missingID, staleMissingID, okID, errorID, htmlAcceptID} {
 		if _, err := db.Exec(`UPDATE bookmarks SET image_url = ? WHERE id = ?`, "/original.svg", id); err != nil {
 			t.Fatalf("初期サムネイル設定エラー: %v", err)
 		}
@@ -287,7 +295,7 @@ func TestHandleBookmark404CheckAsync(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("JSONの解析に失敗しました: %v", err)
 	}
-	if response.Status != bookmark404JobRunning || response.Total != 4 {
+	if response.Status != bookmark404JobRunning || response.Total != 5 {
 		t.Fatalf("開始直後の状態が違います: %#v", response)
 	}
 
@@ -322,7 +330,7 @@ func TestHandleBookmark404CheckAsync(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if response.Total != 4 || response.Checked != 4 || response.NotFound != 2 || response.Failed != 0 {
+	if response.Total != 5 || response.Checked != 5 || response.NotFound != 2 || response.Failed != 0 {
 		t.Fatalf("完了時の集計結果が違います: %#v", response)
 	}
 
@@ -335,6 +343,7 @@ func TestHandleBookmark404CheckAsync(t *testing.T) {
 		{id: staleMissingID, wantImage: "/edited.svg", wantModified: false},
 		{id: okID, wantImage: "/original.svg", wantModified: false},
 		{id: errorID, wantImage: "/original.svg", wantModified: false},
+		{id: htmlAcceptID, wantImage: "/original.svg", wantModified: false},
 	} {
 		var gotImage string
 		var gotModified sql.NullTime

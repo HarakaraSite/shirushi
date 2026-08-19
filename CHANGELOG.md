@@ -2,6 +2,13 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.2.1
+
+### Fixed
+
+- Prevented false 404 results from sites that require an HTML `Accept` request header, including
+  crates.io and claude.com pages.
+
 ## 1.2.0
 
 ### Added

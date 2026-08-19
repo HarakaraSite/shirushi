@@ -359,3 +359,19 @@
 - 実施: Web UIの多言語化を将来機能の候補として記録した。
 - 次: 対応時はボタン名だけでなく、確認・進捗・完了・エラーメッセージも同じ仕組みで多言語化する。
 - 注意: 現在のWeb UI文字列は、404チェックを含め日本語固定。README・API・CHANGELOGの英日文書化とは別の対応になる。
+
+## 2026-08-19 18:35 JST
+
+- 実行エージェント: Codex
+- 作業トピック: 404チェックのHTMLページ誤判定修正
+- 実施: 404確認GETへブラウザ相当の`Accept`ヘッダーを追加した。ヘッダーなしでは404、`text/html`要求時は200を返すfixtureを追加し、crates.io・claude.com型の誤判定を回帰テストで防止した。
+- 次: 利用者確認後にcommitし、必要ならpatch releaseを行う。
+- 注意: 提供された非404 2件と404 9件は、ヘッダー追加後に全件期待どおりのlive応答を確認済み。既に`/404.svg`となったサムネイルは自動復元しない。
+
+## 2026-08-19 18:41 JST
+
+- 実行エージェント: Codex
+- 作業トピック: Shirushi v1.2.1 リリース準備
+- 実施: 通常test、vet、staticcheck、4対象のCGOなしbuildとchecksum、提供11 URLのlive判定、managed Chromiumの404チェックE2Eに成功した。
+- 次: release差分をcommit・pushし、annotated tag `v1.2.1`を公開してForgejo Actionsとassetを確認する。
+- 注意: 利用者判断によりrace testは選択していない。既存のUI多言語化メモcommit `71c23d1`もmainへpushされる。

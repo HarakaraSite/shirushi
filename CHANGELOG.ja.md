@@ -2,6 +2,13 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md)
 
+## 1.2.1
+
+### 修正
+
+- crates.ioやclaude.comなど、HTML用の`Accept`リクエストヘッダーを必要とするサイトを
+  誤って404と判定する問題を修正。
+
 ## 1.2.0
 
 ### 追加
