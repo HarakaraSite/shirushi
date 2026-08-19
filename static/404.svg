@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" role="img" aria-labelledby="title description">
+  <title id="title">404 Not Found</title>
+  <desc id="description">リンク先が見つからないことを示すサムネイル</desc>
+  <rect width="800" height="450" fill="#181818"/>
+  <rect x="28" y="28" width="744" height="394" rx="24" fill="none" stroke="#c0392b" stroke-width="8"/>
+  <text
+    x="400"
+    y="218"
+    fill="#c0392b"
+    font-family="system-ui, sans-serif"
+    font-size="156"
+    font-weight="700"
+    text-anchor="middle"
+  >404</text>
+  <text
+    x="400"
+    y="305"
+    fill="#d8d8d8"
+    font-family="system-ui, sans-serif"
+    font-size="38"
+    font-weight="600"
+    letter-spacing="8"
+    text-anchor="middle"
+  >NOT FOUND</text>
+</svg>

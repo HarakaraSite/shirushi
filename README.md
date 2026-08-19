@@ -26,6 +26,7 @@ Alpine Linux) and be accessed remotely through Caddy.
 - Import and export Netscape Bookmark files (the format exported by Chrome and Firefox)
 - Password authentication for one user, with optional 30-day persistent login
 - Bearer token authentication for API clients such as browser extensions
+- Asynchronous 404 checks for saved URLs, with a bundled replacement thumbnail
 - Optional Japanese article summaries for saved bookmarks through Henji
 - A fixed dark theme
 

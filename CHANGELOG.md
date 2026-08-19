@@ -2,6 +2,23 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.2.0
+
+### Added
+
+- An asynchronous **404 check** action that checks all saved bookmark URLs with bounded concurrency and replaces thumbnails for HTTP 404 responses with a bundled 404 image.
+- Progress polling and completion results for the 404 check, including failed-request counts.
+
+### Changed
+
+- SQLite schema generations are now recorded in `PRAGMA user_version` after migrations complete.
+- The Forgejo tag-release workflow now runs tests and vet, builds four CGO-free binaries, and publishes `SHA256SUMS`.
+
+### Notes
+
+- A 404 result updates both `image_url` and `modified_at`. If the URL is edited while a check is running, the stale result does not overwrite the edited bookmark.
+- 404 job progress is held in memory and is not recovered after restarting Shirushi.
+
 ## 1.1.0
 
 ### Added

@@ -165,11 +165,17 @@ button:hover {
   cursor: pointer;
 }
 
-.header-actions button:hover,
+.header-actions button:hover:not(:disabled),
 .header-actions .header-btn:hover {
   background: var(--s-surface-hover) !important;
   border-color: var(--s-accent) !important;
   color: var(--s-accent) !important;
+}
+
+/* 404確認中は二重実行を防ぎ、処理中であることを見た目でも示します。 */
+.header-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 /* 「追加」ボタンだけアクセントカラーで目立たせます */

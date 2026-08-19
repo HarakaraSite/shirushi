@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -143,6 +144,27 @@ func TestServerDisplayURL(t *testing.T) {
 	}
 }
 
+// Test404ThumbnailIsEmbedded：404画像が正しいSVGとしてバイナリへ埋め込まれるか確認します。
+func Test404ThumbnailIsEmbedded(t *testing.T) {
+	data, err := staticFiles.ReadFile("static/404.svg")
+	if err != nil {
+		t.Fatalf("404画像を埋め込みファイルから読めません: %v", err)
+	}
+
+	var root struct {
+		XMLName xml.Name
+	}
+	if err := xml.Unmarshal(data, &root); err != nil {
+		t.Fatalf("404画像が正しいXMLではありません: %v", err)
+	}
+	if root.XMLName.Local != "svg" {
+		t.Fatalf("ルート要素がsvgではありません: %q", root.XMLName.Local)
+	}
+	if !bytes.Contains(data, []byte(">404</text>")) {
+		t.Fatal("404画像に識別文字が含まれていません")
+	}
+}
+
 // TestHandleGetBookmarks_Empty：データが0件のときに空配列が返るかテストします。
 func TestHandleGetBookmarks_Empty(t *testing.T) {
 	setupTestDB(t)
@@ -219,6 +241,112 @@ func TestHandleGetBookmarks_WithData(t *testing.T) {
 	}
 	if resp.Bookmarks[0].Title != "テスト" {
 		t.Errorf("タイトルが違います: got %s, want テスト", resp.Bookmarks[0].Title)
+	}
+}
+
+// TestHandleBookmark404CheckAsync：開始APIが即座に202を返し、backgroundで更新することを確認します。
+func TestHandleBookmark404CheckAsync(t *testing.T) {
+	setupTestDB(t)
+	// httptestの接続先は127.0.0.1なので、テスト中だけprivate接続を許可します。
+	t.Setenv("SHIRUSHI_ALLOW_PRIVATE_FETCH", "1")
+	bookmark404Job = bookmark404JobState{status: Bookmark404CheckStatus{Status: bookmark404JobIdle}}
+
+	releaseMissing := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/missing", "/stale-missing":
+			// 202応答より後まで外部アクセスを止め、APIが完了を待っていないことを確かめます。
+			<-releaseMissing
+			http.NotFound(w, r)
+		case "/server-error":
+			http.Error(w, "error", http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	missingID := createTestBookmark(t, server.URL+"/missing")
+	staleMissingID := createTestBookmark(t, server.URL+"/stale-missing")
+	okID := createTestBookmark(t, server.URL+"/ok")
+	errorID := createTestBookmark(t, server.URL+"/server-error")
+	for _, id := range []int{missingID, staleMissingID, okID, errorID} {
+		if _, err := db.Exec(`UPDATE bookmarks SET image_url = ? WHERE id = ?`, "/original.svg", id); err != nil {
+			t.Fatalf("初期サムネイル設定エラー: %v", err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/bookmarks/check-404", nil)
+	handleStartBookmark404Check(w, r)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("ステータスコードが違います: got %d, want %d: %s", w.Code, http.StatusAccepted, w.Body.String())
+	}
+	var response Bookmark404CheckStatus
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("JSONの解析に失敗しました: %v", err)
+	}
+	if response.Status != bookmark404JobRunning || response.Total != 4 {
+		t.Fatalf("開始直後の状態が違います: %#v", response)
+	}
+
+	// 実行中の二重開始は、同じURLへ重複アクセスしないよう409で拒否します。
+	w = httptest.NewRecorder()
+	handleStartBookmark404Check(w, httptest.NewRequest(http.MethodPost, "/api/bookmarks/check-404", nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("二重開始のステータスが違います: got %d, want %d", w.Code, http.StatusConflict)
+	}
+
+	// 確認待ちの間にURLとサムネイルを編集し、古いURLの404結果が上書きしないことを確認します。
+	if _, err := db.Exec(`UPDATE bookmarks SET url = ?, image_url = ? WHERE id = ?`, server.URL+"/now-ok", "/edited.svg", staleMissingID); err != nil {
+		t.Fatalf("確認中のbookmark編集エラー: %v", err)
+	}
+
+	close(releaseMissing)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		w = httptest.NewRecorder()
+		handleGetBookmark404CheckStatus(w, httptest.NewRequest(http.MethodGet, "/api/bookmarks/check-404", nil))
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("状態JSONの解析に失敗しました: %v", err)
+		}
+		if response.Status == bookmark404JobCompleted {
+			break
+		}
+		if response.Status == bookmark404JobFailed {
+			t.Fatalf("backgroundジョブが失敗しました: %#v", response)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("backgroundジョブが完了しません: %#v", response)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if response.Total != 4 || response.Checked != 4 || response.NotFound != 2 || response.Failed != 0 {
+		t.Fatalf("完了時の集計結果が違います: %#v", response)
+	}
+
+	for _, tt := range []struct {
+		id           int
+		wantImage    string
+		wantModified bool
+	}{
+		{id: missingID, wantImage: notFoundThumbnailURL, wantModified: true},
+		{id: staleMissingID, wantImage: "/edited.svg", wantModified: false},
+		{id: okID, wantImage: "/original.svg", wantModified: false},
+		{id: errorID, wantImage: "/original.svg", wantModified: false},
+	} {
+		var gotImage string
+		var gotModified sql.NullTime
+		if err := db.QueryRow(`SELECT image_url, modified_at FROM bookmarks WHERE id = ?`, tt.id).Scan(&gotImage, &gotModified); err != nil {
+			t.Fatalf("サムネイル・更新日時取得エラー: %v", err)
+		}
+		if gotImage != tt.wantImage {
+			t.Errorf("bookmark %d のサムネイルが違います: got %q, want %q", tt.id, gotImage, tt.wantImage)
+		}
+		if gotModified.Valid != tt.wantModified {
+			t.Errorf("bookmark %d のmodified_at有無が違います: got %v, want %v", tt.id, gotModified.Valid, tt.wantModified)
+		}
 	}
 }
 

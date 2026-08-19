@@ -542,6 +542,54 @@ bookmark.
 
 ---
 
+## Bookmark 404 check
+
+The Web UI provides a **404チェック** action that starts a single background job for all bookmarks
+saved at that moment. The checker follows HTTP redirects, uses at most five concurrent GET
+requests, and applies the same timeout, redirect limits, and SSRF protection as metadata fetching.
+
+### Start a check
+
+```
+POST /api/bookmarks/check-404
+```
+
+No request body is required. The endpoint returns immediately after the job starts.
+
+**Response** `202 Accepted`
+
+```json
+{
+  "status": "running",
+  "total": 120,
+  "checked": 0,
+  "not_found": 0,
+  "failed": 0
+}
+```
+
+Only a final HTTP `404 Not Found` changes a bookmark. Shirushi sets `image_url` to `/404.svg` and
+updates `modified_at`. Other HTTP statuses and request failures leave the bookmark unchanged. If
+the bookmark URL is edited while the job is running, the result for the old URL is not applied.
+
+| Status | Meaning |
+|--------|---------|
+| `202` | The background job started |
+| `409` | A 404-check job is already running |
+| `500` | Saved bookmarks could not be loaded |
+
+### Get check status
+
+```
+GET /api/bookmarks/check-404
+```
+
+Returns the same counters with `status` set to `idle`, `running`, `completed`, or `failed`. A failed
+database update also includes an `error` string. Job state is held in memory and is reset when
+Shirushi restarts.
+
+---
+
 ## Henji article summaries
 
 Henji is an optional external runtime dependency. Shirushi does not manage Henji API keys or configuration: it only uses the executable selected at startup (by default, `henji` on `PATH`). The summary button is hidden in the Web UI when Henji is unavailable.

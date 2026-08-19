@@ -117,6 +117,12 @@ func runMigrationsOn(d *sql.DB) {
 		migrateAddUniqueURLOn(d)
 		fmt.Println("マイグレーション: UNIQUE 制約を追加しました")
 	}
+
+	// PRAGMA user_version はSQLiteファイル内に整数のスキーマ世代を保存する仕組みです。
+	// 実際のマイグレーション完了後に記録し、DBが現行世代へ到達したことを外部からも確認可能にします。
+	if _, err := d.Exec(fmt.Sprintf("PRAGMA user_version = %d", currentSchemaVersion)); err != nil {
+		log.Fatal("スキーマバージョン記録エラー:", err)
+	}
 }
 
 // hasUniqueURLIndexOn：bookmarks テーブルの url カラムに UNIQUE インデックスがあるか確認します。

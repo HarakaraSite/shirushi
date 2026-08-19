@@ -54,6 +54,8 @@
         <button type="button" onclick="document.getElementById('import-file').click()">インポート</button>
         <input type="file" id="import-file" accept=".html" style="display:none;" onchange="importBookmarks(this)">
         <button type="button" onclick="openTagManager()">タグ管理</button>
+        <!-- 登録済みURLを一括確認し、404のサムネイルを専用画像へ差し替えます -->
+        <button type="button" id="check-404-btn" onclick="checkBookmarksFor404()">404チェック</button>
         <button type="button" onclick="logout()">ログアウト</button>
       </div>
     </div>

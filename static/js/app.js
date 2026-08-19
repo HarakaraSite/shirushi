@@ -7,6 +7,7 @@ let pendingImageUrl = ''; // メタデータ取得で得たOG画像URL（フォ�
 let currentPage = 1;     // 現在表示しているページ番号（1始まり）
 let tagInputInitialized = false; // タグ入力欄のイベント登録が済んでいるか
 let henjiSummaryAvailable = false; // サーバー上でHenjiを起動できるか
+let bookmark404Polling = false; // 404チェック状態を複数のループで重複取得しないためのフラグ
 const PAGE_SIZE_STORAGE_KEY = 'shirushi-page-size';
 const ALLOWED_PAGE_SIZES = [50, 100, 200];
 let pageSize = loadSavedPageSize(); // 保存済みの表示件数。未保存・不正値なら50件です。
@@ -87,6 +88,8 @@ async function showMainScreen(preloadedRes = null) {
   await loadTags();
   await loadBookmarks('', null, 1, preloadedRes);
   setupTagInput();
+  // 別タブやページ再読み込み前に開始したジョブがあれば、進捗表示を再開します。
+  resumeBookmark404Check();
 }
 
 // Henjiが未導入なら、要約機能自体を画面に出さないための能力確認です。
@@ -147,6 +150,116 @@ async function apiFetch(url, options) {
     return null;
   }
   return res;
+}
+
+// checkBookmarksFor404：404チェックのbackgroundジョブを開始します。
+// POSTは確認完了を待たず202を返し、進捗はGET APIを定期的に取得します。
+async function checkBookmarksFor404() {
+  const confirmed = window.confirm(
+    '登録済みの全ブックマークURLを確認します。\n件数によって時間がかかる場合があります。実行しますか？'
+  );
+  if (!confirmed) return;
+
+  const button = document.getElementById('check-404-btn');
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = '開始中…';
+
+  try {
+    const res = await apiFetch('/api/bookmarks/check-404', { method: 'POST' });
+    if (!res) return; // セッション切れ：apiFetchがログイン画面へ戻しています
+    // 別タブなどですでに開始済みなら、新しく開始せず既存ジョブの監視へ合流します。
+    if (res.status === 409) {
+      await monitorBookmark404Check();
+      return;
+    }
+    if (!res.ok) {
+      const message = (await res.text()).trim();
+      alert(message || '404チェックに失敗しました');
+      return;
+    }
+
+    const initialStatus = await res.json();
+    await monitorBookmark404Check(initialStatus);
+  } catch (err) {
+    console.error('404チェックに失敗しました:', err);
+    alert('404チェックに失敗しました。サーバーとの接続を確認してください');
+  } finally {
+    // monitorBookmark404Checkが動いている間は、そちらが進捗表示と復元を担当します。
+    if (!bookmark404Polling) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+}
+
+// resumeBookmark404Check：画面表示時に、すでに実行中のジョブがあるか確認します。
+async function resumeBookmark404Check() {
+  if (bookmark404Polling) return;
+  try {
+    const res = await apiFetch('/api/bookmarks/check-404');
+    if (!res || !res.ok) return;
+    const status = await res.json();
+    if (status.status === 'running') {
+      await monitorBookmark404Check(status);
+    }
+  } catch (err) {
+    // 状態復元の失敗だけで通常のbookmark操作を妨げないよう、consoleへの記録に留めます。
+    console.error('404チェック状態の復元に失敗しました:', err);
+  }
+}
+
+// monitorBookmark404Check：1秒ごとに進捗を取得し、完了時に一覧と結果を表示します。
+async function monitorBookmark404Check(initialStatus = null) {
+  if (bookmark404Polling) return;
+  bookmark404Polling = true;
+
+  const button = document.getElementById('check-404-btn');
+  button.disabled = true;
+  let status = initialStatus;
+
+  try {
+    while (true) {
+      if (!status) {
+        const res = await apiFetch('/api/bookmarks/check-404');
+        if (!res) return; // セッション切れ
+        if (!res.ok) throw new Error(`状態APIエラー: ${res.status}`);
+        status = await res.json();
+      }
+
+      if (status.status === 'running') {
+        button.textContent = `確認中 ${status.checked}/${status.total}`;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        status = null;
+        continue;
+      }
+
+      if (status.status === 'failed') {
+        alert(status.error || '404チェックの更新処理に失敗しました');
+        return;
+      }
+
+      if (status.status === 'completed') {
+        // 現在の検索・タグ・ページを維持したまま、変更後のサムネイルを読み直します。
+        const q = document.getElementById('search-input').value.trim();
+        await loadBookmarks(q, activeTag, currentPage);
+
+        let message = `${status.checked}件を確認しました。404: ${status.not_found}件`;
+        if (status.failed > 0) {
+          message += `\n通信失敗: ${status.failed}件（サムネイルは変更していません）`;
+        }
+        alert(message);
+        return;
+      }
+
+      // idleは開始前の正常状態です。別タブの409直後に取得した場合なども安全に終了します。
+      return;
+    }
+  } finally {
+    bookmark404Polling = false;
+    button.disabled = false;
+    button.textContent = '404チェック';
+  }
 }
 
 // ===== 検索 =====

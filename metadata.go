@@ -111,27 +111,7 @@ func fetchMetadata(url string) (*Metadata, error) {
 // fetchHTML：既存のSSRF対策を保ったまま、指定サイズまでHTMLを取得します。
 // metadata と本文抽出で同じ取得境界を使うため、HTTP通信の処理をここへ集約します。
 func fetchHTML(rawURL string, maxBytes int64) (string, *url.URL, error) {
-	// 10秒でタイムアウトするHTTPクライアントを作ります。
-	// デフォルトのクライアントはタイムアウトがないため、自前で設定するのが定石です。
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("リダイレクト回数が多すぎます")
-			}
-			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-				return errors.New("http/https 以外へのリダイレクトは禁止されています")
-			}
-			return nil
-		},
-	}
-
-	// SSRF対策：接続先のIPを検査するダイヤル関数を組み込みます。
-	// 自宅LAN内のサーバーのメタデータを取得したい場合は、
-	// 環境変数 SHIRUSHI_ALLOW_PRIVATE_FETCH=1 を設定すると検査を無効化できます。
-	if os.Getenv("SHIRUSHI_ALLOW_PRIVATE_FETCH") != "1" {
-		client.Transport = &http.Transport{DialContext: safeDialContext}
-	}
+	client := newSafeHTTPClient()
 
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
@@ -162,6 +142,34 @@ func fetchHTML(rawURL string, maxBytes int64) (string, *url.URL, error) {
 		return "", nil, err
 	}
 	return string(limitedBody), resp.Request.URL, nil
+}
+
+// newSafeHTTPClient：外部URL取得で共通利用する、安全設定済みHTTPクライアントを作ります。
+// メタデータ取得と404確認で同じタイムアウト・リダイレクト・SSRF対策を使うことで、
+// 一方だけ安全設定を忘れる事故を防ぎます。
+func newSafeHTTPClient() *http.Client {
+	// 10秒でタイムアウトするHTTPクライアントを作ります。
+	// デフォルトのクライアントはタイムアウトがないため、自前で設定するのが定石です。
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("リダイレクト回数が多すぎます")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return errors.New("http/https 以外へのリダイレクトは禁止されています")
+			}
+			return nil
+		},
+	}
+
+	// SSRF対策：接続先のIPを検査するダイヤル関数を組み込みます。
+	// 自宅LAN内のサーバーのメタデータを取得したい場合は、
+	// 環境変数 SHIRUSHI_ALLOW_PRIVATE_FETCH=1 を設定すると検査を無効化できます。
+	if os.Getenv("SHIRUSHI_ALLOW_PRIVATE_FETCH") != "1" {
+		client.Transport = &http.Transport{DialContext: safeDialContext}
+	}
+	return client
 }
 
 // extractTitle：HTMLの <title> タグからテキストを取り出します。

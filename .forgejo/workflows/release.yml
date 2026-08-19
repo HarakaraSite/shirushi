@@ -1,9 +1,9 @@
-name: Release
+name: release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-and-release:
@@ -15,27 +15,37 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Test
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Build binaries
+        id: build
         run: |
+          set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 \
-            go build -ldflags="-s -w" -trimpath -o dist/shirushi-linux-amd64  .
-          CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 \
-            go build -ldflags="-s -w" -trimpath -o dist/shirushi-linux-arm64  .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags="-s -w" -trimpath -o dist/shirushi-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -ldflags="-s -w" -trimpath -o dist/shirushi-linux-arm64 .
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
             go build -ldflags="-s -w" -trimpath -o dist/shirushi-darwin-amd64 .
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
             go build -ldflags="-s -w" -trimpath -o dist/shirushi-darwin-arm64 .
+          (cd dist && sha256sum shirushi-* > SHA256SUMS)
 
-      - name: Upload versioned release
+      - name: Upload release
+        if: success()
         uses: actions/forgejo-release@v2
         with:
           direction: upload
-          url: ${{ vars.FORGE_URL }}
-          repo: ${{ github.repository }}
-          token: ${{ secrets.RELEASE_TOKEN }}
-          tag: ${{ github.ref_name }}
+          url: ${{ forgejo.server_url }}
+          repo: ${{ forgejo.repository }}
+          token: ${{ forgejo.token }}
+          tag: ${{ forgejo.ref_name }}
           release-dir: dist
-          release-notes: "Release ${{ github.ref_name }}"
+          release-notes: ${{ format('Release {0}', forgejo.ref_name) }}

@@ -2,6 +2,23 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md)
 
+## 1.2.0
+
+### 追加
+
+- 保存済みbookmarkの全URLを並行数制限付きで確認し、HTTP 404のサムネイルを同梱404画像へ変更する、非同期の「404チェック」操作。
+- 404チェックの進捗ポーリングと、通信失敗件数を含む完了結果表示。
+
+### 変更
+
+- マイグレーション完了後、SQLiteの`PRAGMA user_version`へスキーマ世代を記録。
+- Forgejoのtag release workflowでtest・vet、CGOなし4バイナリbuild、`SHA256SUMS`公開を実施。
+
+### 注意事項
+
+- 404判定時は`image_url`と`modified_at`を更新。確認中にURLが編集された場合、古い結果で編集後のbookmarkを上書きしない。
+- 404ジョブの進捗はメモリ内だけに保持し、Shirushi再起動後は復元しない。
+
 ## 1.1.0
 
 ### 追加

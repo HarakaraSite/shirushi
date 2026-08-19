@@ -1,0 +1,41 @@
+version: 2
+
+runner_label: ubuntu-latest
+actions:
+  checkout: actions/checkout@v4
+  setup_go: actions/setup-go@v5
+  release: actions/forgejo-release@v2
+
+release:
+  uploader_kind: forgejo-release-v2-public
+  url_expression: ${{ forgejo.server_url }}
+  repository_expression: ${{ forgejo.repository }}
+  token_expression: ${{ forgejo.token }}
+  tag_expression: ${{ forgejo.ref_name }}
+  notes_expression: ${{ format('Release {0}', forgejo.ref_name) }}
+
+build:
+  product: shirushi
+  package: .
+  cgo_enabled: false
+  ldflags: -s -w
+  targets:
+    - linux/amd64
+    - linux/arm64
+    - darwin/amd64
+    - darwin/arm64
+
+quality:
+  test_command: CGO_ENABLED=0 go test ./...
+  vet_command: go vet ./...
+  checksums: true
+
+diagnostics:
+  mode: native-actions-logs
+
+pre_release:
+  reference_environment: Lima ai-dev VM with pnpm Playwright CLI and managed headless Chromium
+  reference_checks:
+    - name: bookmark-404-browser-e2e
+      command: PATH="/home/masat.guest/.local/share/pnpm/bin:$PATH" playwright cli --config "/home/masat.guest/.config/playwright-e2e.json" -s=shirushi-release-e2e open http://127.0.0.1:18191
+  evidence_location: docs/release-checkpoints.md

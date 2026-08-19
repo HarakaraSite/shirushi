@@ -32,7 +32,7 @@ type henjiSummaryOutput struct {
 func runHenjiSummary(ctx context.Context, settings HenjiSummarySettings, source string) (string, error) {
 	path, err := exec.LookPath(settings.Path)
 	if err != nil {
-		return "", fmt.Errorf("Henjiが利用できません: %w", err)
+		return "", fmt.Errorf("本文要約でHenjiが利用できません: %w", err)
 	}
 	schema := summarySchemaForAPI(settings.API)
 	inputBudget := summaryInputBudget(settings.MaxInputBytes, summaryPrompt, schema)
@@ -75,7 +75,7 @@ func runHenjiSummary(ctx context.Context, settings HenjiSummarySettings, source 
 		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
 			return "", errors.New("Henjiの実行がタイムアウトしました")
 		}
-		return "", fmt.Errorf("Henjiの実行に失敗しました: %w", err)
+		return "", fmt.Errorf("本文要約でHenjiの実行に失敗しました: %w", err)
 	}
 	if stdout.err != nil {
 		return "", stdout.err

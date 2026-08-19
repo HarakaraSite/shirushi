@@ -94,6 +94,9 @@ func main() {
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)
 	http.HandleFunc("DELETE /api/bookmarks/{id}", handleDeleteBookmark)
 	http.HandleFunc("DELETE /api/bookmarks", handleBulkDeleteBookmarks)
+	// 404チェックは開始直後に202を返し、GETでbackgroundジョブの進捗を確認できます。
+	http.HandleFunc("POST /api/bookmarks/check-404", handleStartBookmark404Check)
+	http.HandleFunc("GET /api/bookmarks/check-404", handleGetBookmark404CheckStatus)
 
 	// タグ関連のAPI
 	http.HandleFunc("GET /api/tags", handleGetTags)

@@ -142,4 +142,15 @@ func TestMigrationReachesCurrentSchema(t *testing.T) {
 			t.Error("fresh DB の bookmarks.url に UNIQUE インデックスがありません")
 		}
 	})
+
+	// runMigrationsOnが完了したDBには、現行スキーマ世代が記録されます。
+	t.Run("schema_version", func(t *testing.T) {
+		var got int
+		if err := migrated.QueryRow("PRAGMA user_version").Scan(&got); err != nil {
+			t.Fatalf("user_version取得エラー: %v", err)
+		}
+		if got != currentSchemaVersion {
+			t.Errorf("スキーマバージョンが違います: got %d, want %d", got, currentSchemaVersion)
+		}
+	})
 }

@@ -536,6 +536,54 @@ POST /api/fetch-metadata
 
 ---
 
+## bookmark 404チェック
+
+Web UIの「404チェック」は、開始時点で保存されている全bookmarkを対象に、1つのbackground
+ジョブを開始します。HTTPリダイレクトを追跡し、最大5並行のGETで確認します。timeout、
+リダイレクト上限、SSRF対策はメタデータ取得と共通です。
+
+### チェック開始
+
+```
+POST /api/bookmarks/check-404
+```
+
+リクエスト本文は不要です。ジョブ開始後、完了を待たずに返します。
+
+**レスポンス** `202 Accepted`
+
+```json
+{
+  "status": "running",
+  "total": 120,
+  "checked": 0,
+  "not_found": 0,
+  "failed": 0
+}
+```
+
+最終HTTP応答が`404 Not Found`の場合だけ、`image_url`を`/404.svg`へ変更し、`modified_at`を
+更新します。それ以外のHTTPステータスと通信失敗ではbookmarkを変更しません。ジョブ実行中に
+bookmarkのURLが編集された場合、古いURLの確認結果は適用しません。
+
+| ステータス | 内容 |
+|-----------|------|
+| `202` | backgroundジョブを開始 |
+| `409` | 404チェックジョブがすでに実行中 |
+| `500` | 保存済みbookmarkの読み込みに失敗 |
+
+### チェック状態取得
+
+```
+GET /api/bookmarks/check-404
+```
+
+同じ集計値を返し、`status`は`idle`、`running`、`completed`、`failed`のいずれかです。DB更新に
+失敗した場合は`error`も含みます。ジョブ状態はメモリ内だけに保持し、Shirushi再起動時に
+リセットされます。
+
+---
+
 ## Henji 本文要約
 
 Henji は任意の外部実行時依存です。ShirushiはHenjiのAPIキーや設定を管理せず、起動時に指定された実行ファイル（既定ではPATH上の`henji`）だけを使います。Henjiが利用できない環境ではWeb UIの要約ボタンは表示されません。
