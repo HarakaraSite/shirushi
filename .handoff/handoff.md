@@ -343,3 +343,11 @@
 - 実施: Forgejo release profile/workflowと日英CHANGELOG・API・READMEをv1.2.0向けに整備した。通常test、vet、staticcheck、4対象のCGOなしbuildとchecksum検証、managed Chromiumで404チェックの非同期進捗・完了・サムネイル・`modified_at`を確認した。
 - 次: 最終差分を確認してcommit・push・v1.2.0 tagを作成し、Forgejo Actionsと公開assetを確認する。
 - 注意: 利用者判断によりrace testは選択していない（`ai-dev`にC compilerなし）。gosec指摘へのコード変更も行わない。
+
+## 2026-08-19 17:52 JST
+
+- 実行エージェント: Codex
+- 作業トピック: Shirushi v1.2.0 リリース完了
+- 実施: `49bbdde`をmainへpushし、annotated tag `v1.2.0`を公開した。Forgejo Actions run #27の成功と、公開された4バイナリ＋`SHA256SUMS`を確認し、全バイナリのchecksumを再ダウンロード後に検証した。
+- 次: なし
+- 注意: v1.2.0 tagはrelease commit `49bbdde`を指す。release後の証跡更新はmain上の追跡commitとして記録する。
