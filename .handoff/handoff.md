@@ -351,3 +351,11 @@
 - 実施: `49bbdde`をmainへpushし、annotated tag `v1.2.0`を公開した。Forgejo Actions run #27の成功と、公開された4バイナリ＋`SHA256SUMS`を確認し、全バイナリのchecksumを再ダウンロード後に検証した。
 - 次: なし
 - 注意: v1.2.0 tagはrelease commit `49bbdde`を指す。release後の証跡更新はmain上の追跡commitとして記録する。
+
+## 2026-08-19 18:05 JST
+
+- 実行エージェント: Codex
+- 作業トピック: UI多言語化の将来候補
+- 実施: Web UIの多言語化を将来機能の候補として記録した。
+- 次: 対応時はボタン名だけでなく、確認・進捗・完了・エラーメッセージも同じ仕組みで多言語化する。
+- 注意: 現在のWeb UI文字列は、404チェックを含め日本語固定。README・API・CHANGELOGの英日文書化とは別の対応になる。
