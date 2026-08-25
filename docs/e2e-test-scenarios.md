@@ -52,8 +52,6 @@ curl -s -c "$COOKIE" -X POST "$BASE_URL/api/login" \
 - **ハッピーパス（正常系）中心**。重要な異常系（認証失敗・重複）も含みます。
 - 各シナリオは **独立実行可能**。テスト開始時に必要なデータを自分で作り、できれば後始末まで行います。
 - 検証は HTTP ステータスコード／JSONレスポンス／件数で行います。JSONの確認には `jq` があると便利です。
-- **playwright-cli** が使える場合は、ブラウザ操作版の手順も併記しています（UI観点の確認用）。
-  ブラウザ版は同じCookieを共有しないため、API版とは別のテストとして実行してください。
 
 ### 主要なAPIエンドポイント早見表
 
@@ -147,16 +145,6 @@ curl -s -o /dev/null -w "%{http_code}\n" -b "$COOKIE" "$BASE_URL/api/bookmarks"
 # => 401
 ```
 
-### playwright-cli 手順（UI版）
-
-1. `$BASE_URL` を開く。ログイン画面が表示される。
-2. パスワード入力欄に `test-password` を入力し、ログインボタンを押す。
-3. ブックマーク一覧が表示されることを確認する。
-4. 新規登録フォームを開き、URL・タイトル・タグ「e2e-main」を入力して保存する。
-5. 検索欄に「メインフロー」と入力し、登録したカードが表示されることを確認する。
-6. タグチップ「e2e-main」をクリックし、同じカードが残ることを確認する。
-7. ログアウトボタンを押し、ログイン画面に戻ることを確認する。
-
 ---
 
 ## シナリオ2: インポートと重複スキップ【必須】
@@ -215,14 +203,6 @@ curl -s -b "$COOKIE" "$BASE_URL/api/tags?all=1" | jq '[.[].name] | map(select(. 
 # created_at の確認（ADD_DATE=1700000000 は 2023-11-14 UTC 前後）
 curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?q=インポート記事1" | jq '.bookmarks[0] | {url, created_at, tags: [.tags[].name]}'
 ```
-
-### playwright-cli 手順（UI版）
-
-1. ログイン後、インポートメニュー／ボタンを開く。
-2. 上記HTMLファイルをファイル選択でアップロードする。
-3. 「2件インポート」等の結果表示を確認する。
-4. 同じファイルを再アップロードし、「0件インポート / 2件スキップ」と表示されることを確認する。
-5. タグ一覧に「e2e-import」「go」が現れることを確認する。
 
 ---
 
@@ -284,15 +264,6 @@ curl -s -b "$COOKIE" -X DELETE "$BASE_URL/api/bookmarks" \
 curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?tag=e2e-bulk" | jq .total
 ```
 
-### playwright-cli 手順（UI版）
-
-1. ログイン後、上記3件を登録する（または既存の3件を使う）。
-2. 各カードのチェックボックスを選択して複数選択状態にする。
-3. 一括操作メニューから「タグを追加」を選び「e2e-bulk」を付与する。
-4. タグフィルター「e2e-bulk」で3件表示されることを確認する。
-5. 3件を再度選択し、一括削除を実行する。確認ダイアログがあれば承認する。
-6. フィルター結果が0件になることを確認する。
-
 ---
 
 ## シナリオ4: ログイン失敗と再ログイン成功【必須】
@@ -343,12 +314,6 @@ curl -s -o /dev/null -w "認証付きアクセス: %{http_code}\n" -b "$COOKIE" 
 > ただし15分ロックされ後続シナリオに影響するため、ロック検証は独立したテスト枠で、
 > かつ専用に起動したインスタンス（または再起動でメモリ上のロック状態をクリア）で実施してください。
 
-### playwright-cli 手順（UI版）
-
-1. `$BASE_URL` を開く。
-2. 誤ったパスワードを入力してログインボタンを押し、エラーメッセージが出ることを確認する。
-3. 正しいパスワードを入力し直してログインし、一覧画面に遷移することを確認する。
-
 ---
 
 ## シナリオ5: ブックマーク編集（URL・タグ・memo更新）【あると良い】
@@ -394,12 +359,6 @@ curl -s -b "$COOKIE" -X PUT "$BASE_URL/api/bookmarks/$BID" -H 'Content-Type: app
 # 4. 再取得で確認
 curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?q=編集後" | jq '.bookmarks[0] | {url, excerpt, tags: [.tags[].name]}'
 ```
-
-### playwright-cli 手順（UI版）
-
-1. 対象カードの編集ボタンを開く。
-2. URL・タイトル・メモ欄を書き換え、タグを「e2e-edit-a」「e2e-edit-b」に付け替える。
-3. 保存し、カードの表示が更新されていることを確認する。
 
 ---
 
@@ -454,12 +413,6 @@ curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?tag=e2e-tagdel" | jq .total
 # => 0
 ```
 
-### playwright-cli 手順（UI版）
-
-1. タグ管理画面で「e2e-tagdel」を削除する。
-2. ブックマーク一覧で対象カードを開き、タグチップが消えていることを確認する。
-3. カード自体は一覧に残っていることを確認する。
-
 ---
 
 ## シナリオ7: エクスポート内容検証（件数・タグ・ADD_DATE）【あると良い】
@@ -504,11 +457,6 @@ grep -c '<DT><A ' "$EXPORT_HTML"                    # => 登録件数（>=1）
 grep 'e2e-export' "$EXPORT_HTML"                    # => 該当行に URL/TAGS が含まれる
 grep -oE 'ADD_DATE="[0-9]+"' "$EXPORT_HTML" | head  # => ADD_DATE が Unix秒の数値
 ```
-
-### playwright-cli 手順（UI版）
-
-1. エクスポートボタンを押し、`shirushi-bookmarks.html` がダウンロードされることを確認する。
-2. ダウンロードしたファイルを開き、登録済みブックマークとタグが含まれることを目視確認する。
 
 ---
 
@@ -664,15 +612,6 @@ curl -s -b "$COOKIE" "$BASE_URL/api/bookmarks?q=%E6%9C%AC%E6%96%87%E4%B8%8D%E8%B
   | jq '.bookmarks[0] | {excerpt, modified_at}'
 # => excerpt は "保持するメモ" のまま、modified_at も要約開始前から変わらない
 ```
-
-### playwright-cli 手順（UI版）
-
-1. Henji利用可のShirushiへログインし、新規登録モーダルと編集モーダルに「AI」がないことを確認する。
-2. Fil-Cを保存し、bookmarkカードに「AI」があることを確認する。
-3. 一度押して標準確認ダイアログを取り消し、Networkに`POST /api/bookmarks/{id}/summary`が出ないことを確認する。
-4. 再度押して承認し、リクエストが一回だけ`202`になることを確認する。モーダルを閉じても構わない。
-5. しばらく待って、ページを再読み込みせずに編集を開き、最新Excerptがフォームに読み込まれることを確認する。その後一覧を手動で再読み込みし、カードにもExcerptが表示されることを確認する。画面内に進捗・完了表示がないことも確認する。
-6. Henji未導入の別プロセスでは編集モーダルにボタンがないことを確認する。
 
 ---
 

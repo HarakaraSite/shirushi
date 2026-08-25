@@ -20,8 +20,7 @@ coverage.out
 # Claude Code のローカル起動設定（パスワード等を含むため除外）
 .claude/launch.json
 
-# Playwright スナップショット・スクリーンショット（一時ファイル）
-.playwright-cli/
+# テストで生成されるスクリーンショット・動画（一時ファイル）
 *.png
 *.webm
 # ドキュメント用画像は除外しない
