@@ -1,13 +1,8 @@
 name: Test
 
-# 全ブランチへの push と main への PR で実行します。
-# タグ push は release.yml が担うため、ここでは除外します。
+# main向けPull Requestのmerge前gateとして実行します。
+# v* tagの検証とasset公開はrelease.ymlが担います。
 on:
-  push:
-    branches:
-      - '**'
-    tags-ignore:
-      - '**'
   pull_request:
     branches:
       - main

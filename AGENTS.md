@@ -10,7 +10,7 @@
 - 新しい作業は、`feature/`、`fix/`、`chore/`などの作業ブランチで開始する。
 - `main`へ直接pushしない。
 - 作業完了と動作確認後に`main`へマージする。
-- Forgejo CIは、ブランチへのpushと`main`向けPull RequestでGoテストを実行する。
+- Forgejo CIは、`main`向けPull RequestでGoテストを実行する。通常ブランチへのpushとmainへのmerge後pushでは実行しない。
 - リリースバイナリは、`v*`タグをpushしたときに生成する。
 
 ## 3. DBスキーマ変更
