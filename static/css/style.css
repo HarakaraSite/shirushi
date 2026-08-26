@@ -13,6 +13,8 @@
   --s-border:           rgba(255, 255, 255, 0.06);
   --s-border-hover:     rgba(255, 255, 255, 0.12);
   --s-text:             #e8e8e8;
+  --s-heading:          #f0f1f3;
+  --s-link:             #0172ad;
   --s-text-muted:       #888888;
   --s-text-dim:         #555555;
   --s-form-background:  #2f2f2f;
@@ -59,11 +61,33 @@ h3,
 h4,
 h5,
 h6 {
+  margin-bottom: 1rem;
+  color: var(--s-heading);
   font-family: var(--s-font-family);
+  font-weight: 700;
 }
 
 h1 {
   font-size: 1.5rem;
+  line-height: 1.125;
+}
+
+h2 {
+  line-height: 1.15;
+}
+
+a {
+  color: var(--s-link);
+  text-decoration: underline;
+}
+
+a:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 0.125rem var(--s-focus-ring);
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .app-title {
@@ -89,6 +113,18 @@ select,
 textarea {
   font-family: inherit;
   line-height: var(--s-line-height);
+}
+
+input,
+select,
+textarea {
+  font-size: 1rem;
+}
+
+:where(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  margin-bottom: 1rem;
+  outline: 0;
+  appearance: none;
 }
 
 input:not([type="checkbox"]):not([type="radio"]),
@@ -121,7 +157,26 @@ select {
   border: var(--s-border-width) solid var(--s-form-border);
   border-radius: var(--s-radius);
   background-color: var(--s-form-background);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238891a4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-position: center right var(--s-form-spacing-y);
+  background-size: 1rem auto;
+  background-repeat: no-repeat;
   color: var(--s-form-text);
+}
+
+[type="search"] {
+  appearance: textfield;
+  outline-offset: -2px;
+}
+
+[type="search"]::-webkit-search-decoration {
+  appearance: none;
+}
+
+textarea {
+  display: block;
+  overflow: auto;
+  resize: vertical;
 }
 
 input::placeholder,
@@ -131,6 +186,8 @@ textarea::placeholder {
 }
 
 label {
+  display: block;
+  margin-bottom: 0.375rem;
   color: var(--s-text);
 }
 
@@ -146,7 +203,9 @@ textarea:focus {
   appearance: none;
   width: 1.25em;
   height: 1.25em;
+  margin: -0.125em 0.5em 0 0;
   padding: 0;
+  outline: 0;
   border: var(--s-border-width) solid var(--s-form-border);
   border-radius: var(--s-radius);
   background-color: var(--s-form-background);
@@ -182,6 +241,13 @@ textarea:focus {
   background: var(--s-surface) !important;
 }
 
+#login-form button[type="submit"] {
+  padding: var(--s-form-spacing-y) var(--s-form-spacing-x);
+  background: var(--s-control-selected);
+  border-color: var(--s-control-selected);
+  color: #fff;
+}
+
 /* ブラウザのオートフィル時は background が上書き不可のため、
    box-shadow で色を「塗り重ねる」ハックを使います。 */
 #login-screen input:-webkit-autofill {
@@ -207,10 +273,25 @@ button,
 [type="submit"] {
   border-radius: var(--s-radius);
   line-height: var(--s-line-height);
+  appearance: button;
+  outline: 0;
+  box-shadow: 0 0 0 0 transparent;
+}
+
+[type="button"],
+[type="submit"] {
+  margin-bottom: 1rem;
 }
 
 button:hover {
   background: var(--s-surface-hover);
+}
+
+button:disabled,
+[type="button"]:disabled,
+[type="submit"]:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 button:focus-visible,
