@@ -231,12 +231,12 @@ textarea:focus {
 
 /* ログイン画面 */
 #login-screen input:not([type="checkbox"]):not([type="radio"]) {
-  background: var(--s-form-background) !important;
-  color: var(--s-text) !important;
-  border: 1px solid var(--s-border-hover) !important;
+  background: var(--s-form-background);
+  color: var(--s-text);
+  border: 1px solid var(--s-border-hover);
 }
 
-/* ログインフォーム全体の背景もダークにします */
+/* HTMLのインライン背景色より優先してログインフォームをダークにします。 */
 #login-form {
   background: var(--s-surface) !important;
 }
@@ -264,7 +264,6 @@ button {
   cursor: pointer;
   font-size: 1rem;
   line-height: var(--s-line-height);
-  /* Pico CSS が button に margin-bottom を付けるため明示的にリセットします */
   margin-bottom: 0;
 }
 
@@ -300,9 +299,7 @@ button:focus-visible,
   box-shadow: 0 0 0 0.125rem var(--s-focus-ring);
 }
 
-/* ===== ヘッダーボタン群のPico CSSリセット =====
-   Pico が button に高い詳細度でプライマリカラーを当てるため、
-   .header-actions button で明示的に上書きします。 */
+/* ===== ヘッダーボタン群 ===== */
 .main-header {
   display: flex;
   justify-content: space-between;
@@ -323,16 +320,16 @@ button:focus-visible,
    .header-btn はボタン風に装飾した <a>（エクスポートリンク）にも同じ見た目を当てます */
 .header-actions button,
 .header-actions .header-btn {
-  background: transparent !important;
-  color: var(--s-text) !important;
-  border: 1px solid var(--s-border-hover) !important;
+  background: transparent;
+  color: var(--s-text);
+  border: 1px solid var(--s-border-hover);
   border-radius: 4px;
   box-sizing: border-box;
   min-height: 36px;
   padding: 6px 14px;
   font-size: 0.875rem;
-  margin: 0 !important;
-  /* <a> 用のリセット：Pico CSS のリンクスタイル（色・下線）を打ち消します */
+  margin: 0;
+  /* <a>のリンク表現をボタン表示へ置き換えます。 */
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -343,9 +340,9 @@ button:focus-visible,
 
 .header-actions button:hover:not(:disabled),
 .header-actions .header-btn:hover {
-  background: var(--s-surface-hover) !important;
-  border-color: var(--s-accent) !important;
-  color: var(--s-accent) !important;
+  background: var(--s-surface-hover);
+  border-color: var(--s-accent);
+  color: var(--s-accent);
 }
 
 /* 404確認中は二重実行を防ぎ、処理中であることを見た目でも示します。 */
@@ -356,15 +353,15 @@ button:focus-visible,
 
 /* 「追加」ボタンだけアクセントカラーで目立たせます */
 .header-actions button[onclick="openModal()"] {
-  background: var(--s-accent) !important;
-  color: #fff !important;
-  border-color: var(--s-accent) !important;
+  background: var(--s-accent);
+  color: #fff;
+  border-color: var(--s-accent);
 }
 
 .header-actions button[onclick="openModal()"]:hover {
-  background: var(--s-accent-hover) !important;
-  border-color: var(--s-accent-hover) !important;
-  color: #fff !important;
+  background: var(--s-accent-hover);
+  border-color: var(--s-accent-hover);
+  color: #fff;
 }
 
 /* ===== 一覧の検索・表示件数 ===== */
@@ -448,7 +445,7 @@ button:focus-visible,
   align-items: center;
 }
 
-/* Pico CSS がボタンを引き伸ばすのを防ぎます */
+/* モーダル内のボタンは内容幅で表示します。 */
 .modal-actions button {
   width: auto;
   padding: 8px 20px;
