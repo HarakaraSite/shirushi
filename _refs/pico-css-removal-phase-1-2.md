@@ -104,15 +104,17 @@ CSS変更前にsnapshotを生成・目視確認し、CSS変更とは別コミッ
 - `var(--pico-*)`参照を対応する独自トークンへ置換する。
 - `--pico-*`定義を削除する。
 - `html`へ`color-scheme: dark`、font、font-size、line-heightを明示する。
-- `body`は独自background tokenと継承fontを使う。
+- `body`は独自background tokenを使い、既存表示と同じ`sans-serif`を維持する。
+- 見出しは独自font tokenを明示する。
 - 冒頭コメントを実態に合わせる。
+- Pico変数削除でbaseline差分が発生したフォーム寸法、placeholder、focus、select、checkbox、buttonの基本ルールだけを第3段階から前倒しする。
 
 ### この段階で変更しないもの
 
 - `static/index.html`のPico CSS linkと`data-theme`
 - `static/css/pico.min.css`
-- button、input、select、textarea、checkboxの全面的な自前化
-- Pico競合用`!important`とセレクタの整理
+- baseline維持に必要な範囲を超えるフォーム状態の全面的な自前化
+- Pico競合用`!important`とセレクタの全面整理
 - JavaScriptの表示状態管理とインラインstyle
 - Go、API、DB
 - hard-codedな全色・全寸法の一括トークン化
@@ -150,6 +152,12 @@ refactor(css): migrate Pico variables to Shirushi tokens
 
 1. 第3段階のフォーム基本スタイルを今回へ前倒しする。
 2. 視覚差を意図したものとして受け入れ、snapshotを更新する。
+
+### Gate判断記録
+
+独自トークン移行後、Pico自身が参照していた変数の削除によりフォーム寸法、focus、checkbox、fontにbaseline差分が発生した。ユーザー判断により第3段階の基本スタイルを必要最小限だけ前倒しし、snapshotを更新せず既存表示を維持する方針を選択した。
+
+前倒し対象はフォームのfont・寸法・色、placeholder、focus、select、checkbox、button、および既存fontの継承関係に限定する。
 
 ## 完了条件
 
