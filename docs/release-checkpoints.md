@@ -1,5 +1,11 @@
 # Release checkpoints
 
+## v1.3.0 — 2026-08-26
+
+| Check | Result | Evidence |
+|---|---|---|
+| Host Firefox user acceptance | passed | User approved candidate commit `5bb5c46c1d08023a09114789cc3c13ccecbb462e` for proposed tag `v1.3.0` using Firefox 154 on the host |
+
 ## v1.2.1 — 2026-08-19
 
 | Check | Result | Evidence |
