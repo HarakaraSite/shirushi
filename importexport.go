@@ -106,7 +106,6 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	// アップロード全体の上限ではないため、MaxBytesReader でも制限します。
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
 	// ParseMultipartForm の引数は最大メモリ使用量（バイト）です。
-	// #nosec G120 -- MaxBytesReader immediately above bounds the complete request body.
 	if err := r.ParseMultipartForm(maxImportBytes); err != nil {
 		http.Error(w, "ファイルの解析に失敗しました", http.StatusBadRequest)
 		return

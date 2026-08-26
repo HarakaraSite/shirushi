@@ -62,7 +62,6 @@ func runHenjiSummary(ctx context.Context, settings HenjiSummarySettings, source 
 	commandCtx, cancel := context.WithTimeout(ctx, henjiSummaryTimeout)
 	defer cancel()
 	args := henjiSummaryArgs(settings, schemaPath)
-	// #nosec G204 -- path is explicit trusted startup configuration and CommandContext does not invoke a shell.
 	cmd := exec.CommandContext(commandCtx, path, args...)
 	cmd.Stdin = strings.NewReader(prepared)
 	stdout := &limitedBuffer{limit: henjiSummaryStdoutLimit}

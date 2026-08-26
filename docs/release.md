@@ -15,10 +15,11 @@ The Forgejo Actions release job runs these checks before uploading any asset:
 Failure output remains in the native Forgejo Actions job log. A failed gate must not create a
 Release or upload diagnostics as release assets.
 
-The branch and pull-request workflow separately runs pinned staticcheck and gosec before code reaches
-`main`. Gosec scans all default severities and confidence levels except the generic unhandled-error audit
-G104; justified, rule-specific `#nosec` annotations document intentional exceptions. The tag workflow
-does not reinstall these tools, so tag only a `main` commit whose branch and pull-request checks passed.
+Pinned staticcheck and gosec are available for local review through
+`./scripts/run-static-analysis.sh`; install them first with
+`./scripts/install-static-analysis-tools.sh`. Gosec scans all default severities and confidence levels
+except the generic unhandled-error audit G104 and the documented path-specific false positives in the
+runner script. These tools do not run in Forgejo Actions or the portable tag workflow.
 
 ## Pre-tag reference check
 
