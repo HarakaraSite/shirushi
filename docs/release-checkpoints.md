@@ -16,6 +16,8 @@
 | Local static analysis | passed | staticcheck 2026.1 and gosec 2.28.0 completed with zero findings; gosec used the documented local exclusions |
 | Main branch CI | passed | [run #47](https://forge.harakara.site/littleisland/shirushi/actions/runs/47) completed successfully for `b143256ce869803a03a4f1ef05409b32a5c1f3fa` |
 | Forgejo native Actions logs | passed | Forgejo `16.0.2`; `fja ci logs --tag v1.2.1` retrieved run #30 through `native_actions_run_logs` with HTTP 200 |
+| Forgejo release workflow | passed | [run #51](https://forge.harakara.site/littleisland/shirushi/actions/runs/51) completed successfully for tag `v1.3.0` targeting `41dc1dc88e5045ad50d571270a41622675785bf9` |
+| Four binaries and `SHA256SUMS` | passed | [v1.3.0 release](https://forge.harakara.site/littleisland/shirushi/releases/tag/v1.3.0); all downloaded binaries passed `sha256sum -c SHA256SUMS`, and both Linux binaries were verified statically linked |
 
 ## v1.2.1 — 2026-08-19
 
