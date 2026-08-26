@@ -34,8 +34,10 @@ diagnostics:
   mode: native-actions-logs
 
 pre_release:
-  reference_environment: Lima ai-dev VM with pnpm Playwright CLI and managed headless Chromium
+  reference_environment: Debian development environment with repository-local Playwright Test and shared managed Firefox and Chromium browsers
   reference_checks:
+    - name: login-visual-regression
+      command: npm run test:e2e:firefox
     - name: bookmark-404-browser-e2e
-      command: PATH="/home/masat.guest/.local/share/pnpm/bin:$PATH" playwright cli --config "/home/masat.guest/.config/playwright-e2e.json" -s=shirushi-release-e2e open http://127.0.0.1:18191
+      command: TODO migrate the bookmark 404 scenario to Playwright Test
   evidence_location: docs/release-checkpoints.md
