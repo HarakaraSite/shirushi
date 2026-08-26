@@ -50,7 +50,7 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	// "__untagged__" は「タグが1つも付いていないブックマーク」を表す特殊値です。
-	const untaggedToken = "__untagged__"
+	const untaggedToken = "__untagged__" // #nosec G101 -- Query sentinel, not a credential.
 
 	// ── WHERE句を動的に組み立てる ────────────────────────────────
 	// 条件が増えても switch のケース数が爆発しないよう、
