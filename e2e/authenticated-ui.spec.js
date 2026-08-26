@@ -90,6 +90,8 @@ async function openAuthenticatedUI(page) {
     page.getByRole('button', { name: 'ログイン' }).click(),
   ]);
   await expect(page.locator('#main-screen')).toBeVisible();
+  await expect(page.locator('#bookmark-list')).toContainText('ブックマークはまだありません。');
+  await page.waitForLoadState('networkidle');
 
   await installAuthenticatedFixtures(page);
   await page.reload();
