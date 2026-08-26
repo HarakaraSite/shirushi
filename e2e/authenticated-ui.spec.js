@@ -48,15 +48,15 @@ async function installAuthenticatedFixtures(page, options = {}) {
     const method = request.method();
 
     if (method !== 'GET') {
+      const contentType = request.headers()['content-type'] ?? '';
       let body = null;
-      if (request.headers()['content-type']?.includes('application/json')) {
+      if (contentType.includes('application/json')) {
         body = request.postDataJSON();
       }
-      requests.push({ method, pathname: url.pathname, body });
+      requests.push({ method, pathname: url.pathname, contentType, body });
 
       if (!fulfillMutations) {
-        await route.continue();
-        return;
+        throw new Error(`想定外のmutation request: ${method} ${url.pathname}`);
       }
       if (url.pathname === '/api/import' && method === 'POST') {
         await route.fulfill({ json: { imported: 1, skipped: 0 } });
@@ -70,8 +70,7 @@ async function installAuthenticatedFixtures(page, options = {}) {
         return;
       }
 
-      await route.continue();
-      return;
+      throw new Error(`未定義のmutation fixture: ${method} ${url.pathname}`);
     }
 
     requests.push({ method, pathname: url.pathname, search: url.search });
@@ -309,42 +308,46 @@ test('バルク操作・import・export・paginationを操作する', async ({ p
   await expect.poll(() => requests.some(
     (request) => request.method === 'GET'
       && request.pathname === '/api/bookmarks'
-      && request.search.includes('page=2'),
+      && new URLSearchParams(request.search).get('page') === '2',
   )).toBe(true);
   await expect(page.locator('.pagination .page-current').first()).toHaveText('2');
 
   await page.locator('.bookmark-checkbox').first().check();
+  await page.getByRole('button', { name: '全て選択' }).click();
+  await expect(page.locator('#bulk-count')).toHaveText('2件選択中');
+  await page.getByRole('button', { name: '✕ 選択解除' }).click();
+  await expect(page.locator('#bulk-bar')).not.toHaveClass(/visible/);
+  await expect(page.locator('.bookmark-checkbox:checked')).toHaveCount(0);
+
+  await page.locator('.bookmark-checkbox').first().check();
   await page.getByRole('button', { name: '＋ タグを追加' }).click();
   await page.locator('#bulk-tag-list .bulk-tag-item').filter({ hasText: 'Go' }).click();
-  await expect.poll(() => requests.some(
+  await expect.poll(() => requests.find(
     (request) => request.method === 'POST'
-      && request.pathname === '/api/bookmarks/bulk/tags'
-      && request.body.bookmark_ids.includes(101)
-      && request.body.tag_ids.includes(11),
-  )).toBe(true);
+      && request.pathname === '/api/bookmarks/bulk/tags',
+  )?.body).toEqual({ bookmark_ids: [101], tag_ids: [11] });
 
   await page.getByRole('button', { name: '－ タグを削除' }).click();
   await page.locator('#bulk-tag-remove-list .bulk-tag-item').filter({ hasText: 'Go' }).click();
-  await expect.poll(() => requests.some(
+  await expect.poll(() => requests.find(
     (request) => request.method === 'DELETE'
-      && request.pathname === '/api/bookmarks/bulk/tags'
-      && request.body.bookmark_ids.includes(101)
-      && request.body.tag_ids.includes(11),
-  )).toBe(true);
+      && request.pathname === '/api/bookmarks/bulk/tags',
+  )?.body).toEqual({ bookmark_ids: [101], tag_ids: [11] });
 
   await page.getByRole('button', { name: '全て選択' }).click();
   await expect(page.locator('#bulk-count')).toHaveText('2件選択中');
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '一括削除' }).click();
-  await expect.poll(() => requests.some(
+  await expect.poll(() => requests.find(
     (request) => request.method === 'DELETE'
-      && request.pathname === '/api/bookmarks'
-      && request.body.ids.length === 2,
-  )).toBe(true);
+      && request.pathname === '/api/bookmarks',
+  )?.body).toEqual({ ids: [101, 102] });
   await expect(page.locator('#bulk-bar')).not.toHaveClass(/visible/);
 
+  requests.length = 0;
+  const importInput = page.locator('#import-file');
   const importDialog = page.waitForEvent('dialog');
-  await page.locator('#import-file').setInputFiles({
+  await importInput.setInputFiles({
     name: 'bookmarks.html',
     mimeType: 'text/html',
     buffer: Buffer.from('<!doctype html><title>bookmarks</title>'),
@@ -352,8 +355,15 @@ test('バルク操作・import・export・paginationを操作する', async ({ p
   const dialog = await importDialog;
   expect(dialog.message()).toBe('インポート完了: 1件追加、0件スキップ');
   await dialog.accept();
-  await expect.poll(() => requests.some(
+  await expect.poll(() => requests.find(
     (request) => request.method === 'POST' && request.pathname === '/api/import',
+  )?.contentType).toMatch(/^multipart\/form-data; boundary=/);
+  await expect(importInput).toHaveValue('');
+  await expect.poll(() => requests.some(
+    (request) => request.method === 'GET' && request.pathname === '/api/tags',
+  )).toBe(true);
+  await expect.poll(() => requests.some(
+    (request) => request.method === 'GET' && request.pathname === '/api/bookmarks',
   )).toBe(true);
 
   const hasHorizontalOverflow = await page.evaluate(
