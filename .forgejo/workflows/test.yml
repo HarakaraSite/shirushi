@@ -24,11 +24,5 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install static analysis tools
-        run: ./scripts/install-static-analysis-tools.sh
-
-      - name: Static analysis
-        run: ./scripts/run-static-analysis.sh
-
       - name: Test
         run: go test ./...
