@@ -39,7 +39,7 @@ pre_release:
     - name: login-visual-regression
       command: npm run test:e2e:firefox
     - name: bookmark-404-browser-e2e
-      command: TODO migrate the bookmark 404 scenario to Playwright Test
+      command: npm run test:e2e:404:firefox
     - name: host-firefox-user-acceptance
       command: manual approval using docs/release.md#host-firefox-user-acceptance
   evidence_location: docs/release-checkpoints.md

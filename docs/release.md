@@ -19,10 +19,11 @@ Release or upload diagnostics as release assets.
 
 ### 404-check browser E2E
 
-Run this check in the development environment using the repository-local Playwright Test setup.
-Firefox is the primary browser, and Chromium is also available for cross-browser confirmation. The
-managed browser binaries are shared through the user-level Playwright cache. Bind both the
-application and its 404 fixture to `127.0.0.1`.
+Run this check in the development environment using the repository-local Playwright Test setup with
+`npm run test:e2e:404:firefox`. Firefox is the primary browser, and Chromium is also available for
+cross-browser confirmation. The managed browser binaries are shared through the user-level Playwright
+cache. The test runner binds both the application and its disposable 404 fixture to `127.0.0.1` and
+enables private-address fetching only for that disposable application process.
 
 Verify the following flow with a temporary database and browser session:
 
@@ -33,10 +34,9 @@ Verify the following flow with a temporary database and browser session:
 5. Confirm through the bookmark API that `modified_at` is non-null.
 6. Confirm there are no browser console errors, then close the temporary session.
 
-Record release-specific results in `docs/release-checkpoints.md`. The login visual-regression test
-is available locally through `npm run test:e2e:firefox`. Migration of the bookmark 404 scenario to
-Playwright Test remains a required TODO before the next release. Browser E2E, race tests, and other
-host-dependent checks do not run in the portable Forgejo workflows.
+Record release-specific results in `docs/release-checkpoints.md`. Run the complete Firefox suite,
+including the login visual-regression test, through `npm run test:e2e:firefox`. Browser E2E, race
+tests, and other host-dependent checks do not run in the portable Forgejo workflows.
 
 ### Host Firefox user acceptance
 
