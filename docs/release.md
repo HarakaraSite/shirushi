@@ -34,9 +34,10 @@ Verify the following flow with a temporary database and browser session:
 6. Confirm there are no browser console errors, then close the temporary session.
 
 Record release-specific results in `docs/release-checkpoints.md`. The login visual-regression test
-is available through `npm run test:e2e:firefox`. Migration of the bookmark 404 scenario to
-Playwright Test remains a required TODO before the next release. Browser E2E, race tests, and other
-host-dependent checks do not run in the portable Forgejo release workflow.
+is available through `npm run test:e2e:firefox` and runs in the branch and pull-request test
+workflow. Migration of the bookmark 404 scenario to Playwright Test remains a required TODO before
+the next release. Browser E2E, race tests, and other host-dependent checks do not run in the
+portable Forgejo release workflow.
 
 ## Publish
 

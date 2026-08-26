@@ -26,3 +26,29 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Install Firefox and system dependencies
+        run: npx playwright install --with-deps firefox
+
+      - name: Run Firefox E2E test
+        run: npm run test:e2e:firefox
