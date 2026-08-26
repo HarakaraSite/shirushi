@@ -38,6 +38,77 @@ is available locally through `npm run test:e2e:firefox`. Migration of the bookma
 Playwright Test remains a required TODO before the next release. Browser E2E, race tests, and other
 host-dependent checks do not run in the portable Forgejo workflows.
 
+### Host Firefox user acceptance
+
+User approval from Firefox running on the host is a required pre-tag gate. Use a disposable binary
+and database in the development VM; do not expose the check server on the VM network or reuse
+production data.
+
+The application source being approved must already be committed. From the repository root in the VM,
+run the following commands in Bash with a clean working tree. Choose a temporary password only for
+this check:
+
+```bash
+if test -n "$(git status --porcelain)"; then
+  echo 'Working tree must be clean before user acceptance.' >&2
+  exit 1
+fi
+CHECK_COMMIT=$(git rev-parse HEAD) || exit 1
+CHECK_DIR=$(mktemp -d) || exit 1
+if ! CGO_ENABLED=0 go build -trimpath -o "$CHECK_DIR/shirushi" .; then
+  rm -rf "$CHECK_DIR"
+  unset CHECK_DIR CHECK_COMMIT
+  exit 1
+fi
+if ! read -rsp 'Temporary Shirushi password: ' SHIRUSHI_CHECK_PASSWORD; then
+  rm -rf "$CHECK_DIR"
+  unset CHECK_DIR CHECK_COMMIT
+  exit 1
+fi
+echo
+printf 'Candidate commit: %s\n' "$CHECK_COMMIT"
+(
+  cd -- "$CHECK_DIR" || exit 1
+  SHIRUSHI_ADDR=127.0.0.1:18180 \
+    SHIRUSHI_PASSWORD="$SHIRUSHI_CHECK_PASSWORD" \
+    "$CHECK_DIR/shirushi"
+)
+```
+
+Keep that process running. On the host, bind the same host-local port to the VM-local listener. Replace
+the placeholder with the normal SSH destination for the development VM:
+
+```sh
+ssh -o ExitOnForwardFailure=yes -N \
+  -L 127.0.0.1:18180:127.0.0.1:18180 \
+  <vm-ssh-destination>
+```
+
+Open `http://127.0.0.1:18180` in host Firefox and verify:
+
+1. Login, logout, and the remember-me checkbox work.
+2. The desktop layout, search, page-size select, and pagination have no clipping or horizontal overflow.
+3. Bookmark add, edit, delete, tag suggestions, and tag management work.
+4. Selection, bulk tag add/remove, bulk delete, import, and export work.
+5. Hover, disabled, and keyboard focus-visible states remain clear.
+6. Firefox DevTools shows no unexpected console error or failed CSS request; only `style.css` is loaded
+   as an application stylesheet.
+
+The user must explicitly approve the candidate after this check. Record `CHECK_COMMIT`, the proposed
+tag, host Firefox version, result, and user approval in `docs/release-checkpoints.md` before tagging.
+The checkpoint-only documentation commit may be added after approval. If application source,
+configuration, embedded static files, or the release workflow changes after the check, repeat this
+user acceptance against the new commit before tagging.
+
+After stopping Shirushi with Ctrl-C, remove the disposable data and clear the temporary password:
+
+```sh
+rm -rf "$CHECK_DIR"
+unset SHIRUSHI_CHECK_PASSWORD CHECK_DIR CHECK_COMMIT
+```
+
+Stop the host SSH command with Ctrl-C as well.
+
 ## Publish
 
 After all selected gates pass and their evidence is recorded:
