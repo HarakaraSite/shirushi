@@ -2,6 +2,19 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md)
 
+## 1.3.0
+
+### 変更
+
+- 同梱Pico CSSへの依存を削除し、既存のデスクトップ・モバイル操作を維持したまま、
+  base・form・layout・操作状態のstyleをShirushi独自CSSへ移行。
+- hover、disabled、keyboard focus-visibleの状態をShirushi design tokenで統一。
+
+### 品質
+
+- FirefoxとChromium向けに、非同期404チェックを含む視覚・操作回帰テストを
+  repository-local Playwright Testで追加。
+
 ## 1.2.1
 
 ### 修正

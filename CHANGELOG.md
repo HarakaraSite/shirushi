@@ -2,6 +2,19 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.3.0
+
+### Changed
+
+- Replaced the bundled Pico CSS dependency with Shirushi-owned base, form, layout, and interaction
+  styles while preserving the existing desktop and mobile workflows.
+- Unified hover, disabled, and keyboard focus-visible states under Shirushi design tokens.
+
+### Quality
+
+- Added repository-local Playwright visual and interaction regression coverage for Firefox and
+  Chromium, including the asynchronous 404-check flow.
+
 ## 1.2.1
 
 ### Fixed

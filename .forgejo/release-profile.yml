@@ -34,10 +34,12 @@ diagnostics:
   mode: native-actions-logs
 
 pre_release:
-  reference_environment: Debian development environment with repository-local Playwright Test and shared managed Firefox and Chromium browsers
+  reference_environment: Debian development VM with repository-local Playwright Test, plus host Firefox connected to the VM through SSH local port forwarding
   reference_checks:
     - name: login-visual-regression
       command: npm run test:e2e:firefox
     - name: bookmark-404-browser-e2e
-      command: TODO migrate the bookmark 404 scenario to Playwright Test
+      command: npm run test:e2e:404:firefox
+    - name: host-firefox-user-acceptance
+      command: manual approval using docs/release.md#host-firefox-user-acceptance
   evidence_location: docs/release-checkpoints.md
