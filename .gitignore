@@ -20,8 +20,20 @@ coverage.out
 # Claude Code のローカル起動設定（パスワード等を含むため除外）
 .claude/launch.json
 
-# テストで生成されるスクリーンショット・動画（一時ファイル）
+# Piが生成するローカル実行履歴
+/.pi/agent/runs/
+
+# Node.jsの開発用依存
+node_modules/
+
+# Playwright Testの一時出力
+playwright-report/
+test-results/
+blob-report/
+
+# テストで生成される一時的なスクリーンショット・動画
 *.png
 *.webm
-# ドキュメント用画像は除外しない
+# ドキュメント画像と視覚回帰テストの基準画像は除外しない
 !docs/*.png
+!e2e/**/*-snapshots/*.png
