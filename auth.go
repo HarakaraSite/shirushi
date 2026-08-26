@@ -162,6 +162,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Cookieにトークンをセットします。
 	// HttpOnly: JavaScriptからCookieを読めなくする（XSS対策）
 	// SameSite: 別サイトからのリクエストにCookieを送らない（CSRF対策）
+	// #nosec G124 -- Secure is deployment-configurable; HttpOnly and SameSite remain mandatory below.
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
@@ -187,6 +188,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cookieを即座に無効化します（MaxAge=-1 で削除）。
+	// #nosec G124 -- Secure is deployment-configurable; HttpOnly and SameSite remain mandatory below.
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    "",

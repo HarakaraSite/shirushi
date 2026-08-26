@@ -10,7 +10,7 @@
 - 新しい作業は、`feature/`、`fix/`、`chore/`などの作業ブランチで開始する。
 - `main`へ直接pushしない。
 - 作業完了と動作確認後に`main`へマージする。
-- Forgejo CIは、ブランチへのpushと`main`向けPull RequestでGoテストを実行する。
+- Forgejo CIは、ブランチへのpushと`main`向けPull RequestでGoテスト、staticcheck、gosecを実行する。
 - リリースバイナリは、`v*`タグをpushしたときに生成する。
 
 ## 3. DBスキーマ変更
@@ -28,9 +28,13 @@ DBスキーマを変更する場合は、次の3ステップをすべて実施�
 ```sh
 CGO_ENABLED=0 go test ./...
 go vet ./...
+scripts/run-static-analysis.sh
 node --check static/js/app.js
 git diff --check
 ```
+
+static analysis toolが未導入の場合は、先に`scripts/install-static-analysis-tools.sh`を実行する。
+このinstallerはprojectのGo versionを使用し、staticcheckとchecksum検証済みgosec binaryを固定versionで導入する。
 
 ## 5. 進め方
 
