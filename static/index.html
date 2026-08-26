@@ -1,18 +1,10 @@
 <!DOCTYPE html>
-<!-- data-theme="dark"：Pico CSS をダークテーマに固定します。
-     これがないと OS のライト/ダーク設定によって Pico のライト用変数
-     （:root:not([data-theme=dark]) という高詳細度セレクタ）が
-     style.css の :root 上書きに勝ってしまい、ライトモードのOSで表示が崩れます。 -->
-<html lang="ja" data-theme="dark">
+<html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shirushi</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <!-- Pico CSS classless: セマンティックHTMLにクラスなしでスタイルが当たります。
-       go:embed でバイナリに同梱しているため、オフライン環境でも動作します。 -->
-  <link rel="stylesheet" href="/css/pico.min.css">
-  <!-- アプリ固有のスタイル -->
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
