@@ -5,6 +5,7 @@ package main
 
 import (
 	"database/sql" // *sql.DB 型を使うためのパッケージ
+	"net"          // 信頼するプロキシのIPアドレスを保持します
 	"sync"         // Mutex（排他ロック）を使うためのパッケージ
 	"time"         // 時刻・期間を扱うためのパッケージ
 )
@@ -60,6 +61,10 @@ var db *sql.DB
 // apiToken：起動時に SHIRUSHI_API_TOKEN から読み込んだ Bearer トークンです。
 // 空文字の場合は Bearer 認証が無効（Cookie のみで動作）です。
 var apiToken string
+
+// trustedProxyIPs：起動時に読み込む、転送ヘッダーを信頼する追加プロキシのIPです。
+// 未設定の場合は従来どおりループバックだけを信頼します。
+var trustedProxyIPs []net.IP
 
 // henjiSummarySettings：本文要約でHenjiへ渡すprovider/modelの組です。
 // APIキーはここに持たず、Henji自身の設定だけで解決します。

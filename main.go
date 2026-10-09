@@ -31,6 +31,10 @@ func main() {
 	if err != nil {
 		log.Fatal("Henji本文要約の起動引数エラー:", err)
 	}
+	trustedProxyIPs, err = parseTrustedProxyIPs(os.Getenv("SHIRUSHI_TRUSTED_PROXIES"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	// 1. データベースファイル（shirushi.db）を開きます。
 	//
 	// SQLite は外部キー制約がデフォルト無効のため、DSN（接続文字列）の

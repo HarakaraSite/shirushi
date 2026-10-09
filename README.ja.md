@@ -79,6 +79,7 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 | `SHIRUSHI_API_TOKEN` | （未設定） | Bearer認証用トークン。未設定の場合はCookie認証のみ有効 |
 | `SHIRUSHI_ADDR` | `:8181` | 待ち受けアドレス。Caddy 同一ホスト構成では `127.0.0.1:8181` を推奨 |
 | `SHIRUSHI_COOKIE_SECURE` | （未設定） | `1` にするとセッション Cookie に `Secure` 属性を付与。HTTPS 運用時に設定 |
+| `SHIRUSHI_TRUSTED_PROXIES` | （未設定） | 転送元IPを信頼するプロキシのIPアドレスをカンマ区切りで指定。IPv4/IPv6に対応。ループバックは常に信頼 |
 | `SHIRUSHI_ALLOW_PRIVATE_FETCH` | （未設定） | `1` にするとメタデータ取得時の SSRF チェックを無効化。社内ツールなど限定用途向け |
 
 ---
@@ -107,16 +108,21 @@ shirushi.example.com {
 ```bash
 SHIRUSHI_PASSWORD='長くランダムなパスワード' \
 SHIRUSHI_COOKIE_SECURE=1 \
+SHIRUSHI_TRUSTED_PROXIES='<Caddy LXC の LAN IP>' \
 ./shirushi
 ```
 
 待ち受けアドレスはデフォルトの `:8181`（全インターフェース）のままで構いません。
 80/443 番ポートのみ外部公開し Caddy にルーティングする構成であれば、8181 はインターネットに露出しません。
 
-> **注意**: `header_up -X-Forwarded-For` で XFF ヘッダーを削除しないでください。
-> XFF がない状態で全リクエストが Caddy LXC の IP として扱われ、ログイン失敗カウントを
-> 全クライアントで共有します。Caddy の `reverse_proxy` はデフォルトで XFF を自動付与するため、
-> 通常は設定不要です。
+`SHIRUSHI_TRUSTED_PROXIES` には **Caddy側のLAN IP** を指定します。ShirushiはそのIPから
+届いた `X-Forwarded-For` を使い、元のアクセス元IPごとにログイン失敗を数えます。
+例: `SHIRUSHI_TRUSTED_PROXIES=192.168.1.10`。複数ならカンマで区切ります。
+ホスト名・CIDR・ポート付きの値は受け付けず、不正な値があれば起動時にエラーになります。
+
+> **注意**: Caddyの `reverse_proxy` はデフォルトでXFFを付与するため、
+> `header_up -X-Forwarded-For` で削除しないでください。別LXCで上記の信頼設定がない場合や、
+> 転送元IPのヘッダーが届かない場合はCaddyのIPで数えるため、ログイン失敗カウントを共有します。
 
 ---
 

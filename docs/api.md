@@ -68,6 +68,8 @@ expiration is 30 days when `rememberMe: true`; otherwise it is a session cookie.
 | `401` | Incorrect password |
 | `429` | Five failures from the same IP within 15 minutes (locked for 15 minutes) |
 
+For loopback peers or proxies listed in `SHIRUSHI_TRUSTED_PROXIES`, failures are counted by the forwarded client IP.
+
 ---
 
 ### Log out
