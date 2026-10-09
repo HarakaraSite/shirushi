@@ -1,5 +1,21 @@
 # Release checkpoints
 
+## v1.3.1 — 2026-10-09
+
+| Check | Result | Evidence |
+|---|---|---|
+| Host Firefox user acceptance | skipped by user | User explicitly requested skipping this manual check for v1.3.1; no host Firefox approval is claimed |
+| Automated pre-tag candidate | passed | Candidate `cdd6b1d36f76fd1ee324dfba4877be5808677423`; merge `fd20b981925f632690acfb9c57e448cb8199b609` contains identical application sources, embedded static files, and release workflow |
+| Proxy login regression | passed | A client locked after five failures does not block another client's correct login through the same trusted proxy; the first client remains locked; untrusted peers cannot select the client IP using forwarding headers |
+| `CGO_ENABLED=0 go test ./...` | passed | Local pre-tag gate using Go 1.26.4 |
+| `go vet ./...` | passed | Local pre-tag gate using Go 1.26.4 |
+| Local static analysis | passed | `scripts/run-static-analysis.sh`; staticcheck and gosec completed with zero findings using the documented exclusions |
+| JavaScript syntax and diff checks | passed | `node --check static/js/app.js` and `git diff --check` |
+| Firefox Playwright suite | passed | 8 passed and 1 Chromium-only mobile baseline skipped; includes login, authenticated UI, bookmark operations, and the 404-check flow |
+| Linux/macOS amd64/arm64 builds | passed | Four CGO-free binaries built with Go 1.26.4; all passed `sha256sum -c SHA256SUMS`; Linux ELF files contain neither PT_INTERP nor PT_DYNAMIC |
+| Independent fix review | passed | No remaining findings in the trusted-proxy change after the IPv6 scoped-peer regression was addressed |
+| Fix pull-request CI | passed | [run #59](https://forge.harakara.site/littleisland/shirushi/actions/runs/59) completed successfully for candidate `cdd6b1d36f76fd1ee324dfba4877be5808677423`; [PR #9](https://forge.harakara.site/littleisland/shirushi/pulls/9) merged |
+
 ## v1.3.0 — 2026-08-26
 
 | Check | Result | Evidence |
