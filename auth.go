@@ -9,8 +9,10 @@ import (
 	"crypto/subtle" // タイミング攻撃を防ぐ一定時間比較のためのパッケージ
 	"encoding/hex"  // バイト列を16進数文字列に変換するパッケージ
 	"encoding/json" // レスポンスをJSON形式で返すパッケージ
+	"fmt"           // プロキシ設定の不正なIPを説明します
 	"net"           // IPアドレスの判定や SplitHostPort に使うパッケージ
 	"net/http"      // Webハンドラ・Cookie操作に使うパッケージ
+	"net/netip"     // IPv6のインターフェース識別子を含む接続元を解析します
 	"os"            // 環境変数を読み取るパッケージ
 	"strings"       // authMiddleware のパス判定に使うパッケージ
 	"time"          // セッション有効期限・ロック時間の管理に使うパッケージ
@@ -209,7 +211,7 @@ func secureSessionCookie() bool {
 }
 
 // getClientIP：ログイン制限に使うクライアントIPを取り出します。
-// Caddyなどのリバースプロキシが同じホストから接続している場合だけ、
+// ループバックまたは設定済みのCaddyなどから接続している場合だけ、
 // X-Forwarded-For / X-Real-IP を信頼します。直接アクセス時にこれらのヘッダーを
 // 無条件に信じると、攻撃者が任意のIPを名乗れてしまうためです。
 func getClientIP(r *http.Request) string {
@@ -217,10 +219,11 @@ func getClientIP(r *http.Request) string {
 	if err != nil {
 		remoteHost = r.RemoteAddr
 	}
-	remoteIP := net.ParseIP(remoteHost)
-	if remoteIP == nil {
+	remoteAddr, err := netip.ParseAddr(remoteHost)
+	if err != nil {
 		return remoteHost
 	}
+	remoteIP := net.IP(remoteAddr.AsSlice())
 
 	if isTrustedProxyIP(remoteIP) {
 		if ip := lastForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
@@ -240,9 +243,34 @@ func getClientIP(r *http.Request) string {
 }
 
 // isTrustedProxyIP：プロキシ用ヘッダーを信頼してよい接続元か判定します。
-// CaddyとShirushiを同じLXC/ホスト内で動かす想定なので、まずはループバックだけを信頼します。
+// 同じLXCのループバックと、別LXC用に明示されたIPだけを信頼します。
 func isTrustedProxyIP(ip net.IP) bool {
-	return ip.IsLoopback()
+	if ip.IsLoopback() {
+		return true
+	}
+	for _, proxyIP := range trustedProxyIPs {
+		if ip.Equal(proxyIP) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTrustedProxyIPs：カンマ区切りのIPv4/IPv6を起動時に検証します。
+func parseTrustedProxyIPs(raw string) ([]net.IP, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var ips []net.IP
+	for _, value := range strings.Split(raw, ",") {
+		value = strings.TrimSpace(value)
+		ip := net.ParseIP(value)
+		if ip == nil {
+			return nil, fmt.Errorf("SHIRUSHI_TRUSTED_PROXIES にはプロキシのIPアドレスを指定してください（不正な値: %q）", value)
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
 }
 
 // lastForwardedIP：X-Forwarded-For の末尾IPを取り出します。

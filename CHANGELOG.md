@@ -2,6 +2,18 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.3.1
+
+### Fixed
+
+- Addressed shared failed-login counts for clients behind Caddy on a separate LXC or host.
+  Set `SHIRUSHI_TRUSTED_PROXIES` to the Caddy IP to count failures per original client IP.
+
+### Notes
+
+- Separate-LXC and separate-host deployments need `SHIRUSHI_TRUSTED_PROXIES` configured after updating.
+  Without the setting, only loopback peers are trusted, as before.
+
 ## 1.3.0
 
 ### Changed

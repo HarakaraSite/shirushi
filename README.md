@@ -82,6 +82,7 @@ SHIRUSHI_PASSWORD='yourpassword' ./shirushi
 | `SHIRUSHI_API_TOKEN` | (unset) | Bearer token for API authentication. When unset, only cookie authentication is enabled. |
 | `SHIRUSHI_ADDR` | `:8181` | Listen address. Use `127.0.0.1:8181` when Caddy runs on the same host. |
 | `SHIRUSHI_COOKIE_SECURE` | (unset) | Set to `1` to add the `Secure` attribute to session cookies. Set this for HTTPS deployments. |
+| `SHIRUSHI_TRUSTED_PROXIES` | (unset) | Comma-separated proxy IP addresses whose forwarded client IPs are trusted. Supports IPv4/IPv6. Loopback is always trusted. |
 | `SHIRUSHI_ALLOW_PRIVATE_FETCH` | (unset) | Set to `1` to disable SSRF protection while fetching metadata. Only for restricted use cases such as internal tools. |
 
 ---
@@ -110,6 +111,7 @@ shirushi.example.com {
 ```bash
 SHIRUSHI_PASSWORD='a-long-random-password' \
 SHIRUSHI_COOKIE_SECURE=1 \
+SHIRUSHI_TRUSTED_PROXIES='<Caddy LXC LAN IP>' \
 ./shirushi
 ```
 
@@ -117,11 +119,16 @@ You may keep the default listen address, `:8181` (all interfaces). If only
 ports 80 and 443 are publicly exposed and routed through Caddy, port 8181 is
 not exposed to the Internet.
 
-> **Note**: Do not remove the XFF header with
-> `header_up -X-Forwarded-For`. Without XFF, every request is treated as coming
-> from the Caddy LXC IP, so failed-login counts are shared by all clients.
-> Caddy's `reverse_proxy` adds XFF by default, so no extra configuration is
-> normally needed.
+Set `SHIRUSHI_TRUSTED_PROXIES` to the **Caddy LXC's LAN IP**. Shirushi uses
+`X-Forwarded-For` from that peer to count failed logins per original client IP.
+For example: `SHIRUSHI_TRUSTED_PROXIES=192.168.1.10`. Separate multiple IPs with
+commas. Hostnames, CIDRs, and addresses with ports are not accepted; invalid
+values cause a startup error.
+
+> **Note**: Caddy's `reverse_proxy` adds XFF by default; do not remove it with
+> `header_up -X-Forwarded-For`. Without the trust setting for a separate LXC,
+> or without forwarded client IP headers, failed-login counts use the Caddy
+> IP and are shared by all clients.
 
 ---
 

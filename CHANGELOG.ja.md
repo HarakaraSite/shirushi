@@ -2,6 +2,18 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md)
 
+## 1.3.1
+
+### 修正
+
+- 別LXC・別ホストのCaddy経由でログイン失敗カウントが全クライアントに共有される問題に対応。
+  `SHIRUSHI_TRUSTED_PROXIES` にCaddyのIPを指定すると、元のクライアントIPごとに失敗を数えます。
+
+### 注意事項
+
+- 別LXC・別ホスト構成では、更新後に `SHIRUSHI_TRUSTED_PROXIES` の設定が必要です。
+  未設定時は従来どおりループバックだけを信頼します。
+
 ## 1.3.0
 
 ### 変更
