@@ -15,6 +15,11 @@
 | Linux/macOS amd64/arm64 builds | passed | Four CGO-free binaries built with Go 1.26.4; all passed `sha256sum -c SHA256SUMS`; Linux ELF files contain neither PT_INTERP nor PT_DYNAMIC |
 | Independent fix review | passed | No remaining findings in the trusted-proxy change after the IPv6 scoped-peer regression was addressed |
 | Fix pull-request CI | passed | [run #59](https://forge.harakara.site/littleisland/shirushi/actions/runs/59) completed successfully for candidate `cdd6b1d36f76fd1ee324dfba4877be5808677423`; [PR #9](https://forge.harakara.site/littleisland/shirushi/pulls/9) merged |
+| Pre-tag checkpoint CI | passed | [run #60](https://forge.harakara.site/littleisland/shirushi/actions/runs/60) completed successfully for checkpoint commit `e85deadaf56854df3355d9f3cbd412f4a8169d20`; [PR #10](https://forge.harakara.site/littleisland/shirushi/pulls/10) merged |
+| Published tag tree | passed | Annotated tag `v1.3.1` targets `3736407d9029d04c788ca7cfb1cb482570e1bebf`; application sources, embedded static files, and the release workflow match the tested candidate |
+| Forgejo release workflow | passed | [run #61](https://forge.harakara.site/littleisland/shirushi/actions/runs/61) completed successfully for tag `v1.3.1` |
+| Four binaries and `SHA256SUMS` | passed | [v1.3.1 release](https://forge.harakara.site/littleisland/shirushi/releases/tag/v1.3.1); all four publicly downloaded binaries matched `SHA256SUMS`; Linux amd64/arm64 ELF architectures were verified, with neither PT_INTERP nor PT_DYNAMIC |
+| Release configuration guidance | passed | Public release notes explain setting `SHIRUSHI_TRUSTED_PROXIES` to the Caddy IP for separate-LXC and separate-host deployments |
 
 ## v1.3.0 — 2026-08-26
 
