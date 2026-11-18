@@ -1,5 +1,19 @@
 # Release checkpoints
 
+## v1.4.0 — 2026-11-19
+
+| Check | Result | Evidence |
+|---|---|---|
+| Host Firefox user acceptance | skipped by user | The user explicitly requested skipping the host Firefox check for v1.4.0 |
+| Pre-tag candidate | verified | `d7ac1a756db875681c95a04c4fd88cc862202f42` contains the application and release notes verified below |
+| Go tests, vet, and static analysis | passed | `CGO_ENABLED=0 go test ./...` passed on Go 1.26.4 and 1.27.2. `go vet ./...` and `scripts/run-static-analysis.sh` passed on Go 1.26.4 |
+| JavaScript syntax and diff checks | passed | `node --check static/js/app.js`, `node --check e2e/authenticated-ui.spec.js`, and `git diff --check` |
+| SQLite upgrade compatibility | passed | A disposable WAL database written using SQLite 3.51.3 passed the integrity check, preserved its bookmark and tag, and could be updated and reopened using SQLite 3.54.1 |
+| Firefox Playwright suite | passed | Playwright 1.65.1 and Firefox 159.0. Eight passed and the Chromium-only mobile baseline was skipped |
+| Chromium Playwright suite | passed | Playwright 1.65.1 and Chromium 159.0.8154.6. Nine passed, including the mobile baseline |
+| 404-check browser E2E | passed | The dedicated Firefox test verified thumbnail delivery and replacement by `/404.svg`, the progress and completion messages, and the saved update timestamp |
+| Linux and macOS amd64 and arm64 builds | passed | Four CGO-free binaries built with Go 1.26.4 and verified with `sha256sum -c SHA256SUMS`. Both Linux binaries had no `PT_INTERP` or `PT_DYNAMIC` segments |
+
 ## v1.3.1 — 2026-10-09
 
 | Check | Result | Evidence |
