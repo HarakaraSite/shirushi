@@ -276,11 +276,18 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 
 // ===== データ取得 =====
 
-async function loadTags() {
+async function fetchUsedTags() {
   const res = await apiFetch('/api/tags');
-  if (!res) return; // セッション切れ：ログイン画面に戻っているので中断します
-  allTags = await res.json() ?? [];
+  if (!res) return null; // セッション切れ
+  return (await res.json()) ?? [];
+}
+
+async function loadTags() {
+  const tags = await fetchUsedTags();
+  if (!tags) return null;
+  allTags = tags;
   renderTagFilterChips();
+  return tags;
 }
 
 // タグフィルターチップを描画します。
@@ -491,18 +498,17 @@ const tagManagerMap = new Map(); // Map<id: number, name: string>
 
 // 全タグ一覧を描画します。
 // ?all=1 で未使用タグも取得します。使用中タグとの区別は usedIds で判定します。
-async function renderTagManagerList() {
+async function renderTagManagerList(usedTagsPromise = fetchUsedTags()) {
   const listEl = document.getElementById('tag-manager-list');
   listEl.innerHTML = '<p style="color:#888; font-size:0.85rem;">読み込み中...</p>';
 
   // 全タグ（未使用含む）と使用中タグを並行取得します。
-  const [allRes, usedRes] = await Promise.all([
+  const [allRes, usedTagsList] = await Promise.all([
     apiFetch('/api/tags?all=1'),
-    apiFetch('/api/tags'),
+    usedTagsPromise,
   ]);
-  if (!allRes || !usedRes) return; // セッション切れ
-  const allTagsList  = await allRes.json()  ?? [];
-  const usedTagsList = await usedRes.json() ?? [];
+  if (!allRes || !usedTagsList) return; // セッション切れ
+  const allTagsList = await allRes.json() ?? [];
 
   // 使用中タグのIDをSetに入れてO(1)で参照できるようにします。
   const usedIds = new Set(usedTagsList.map(t => t.id));
@@ -540,15 +546,11 @@ async function deleteTag(id) {
     return;
   }
 
-  // タグ一覧とフィルターチップを更新します。
-  await Promise.all([
-    renderTagManagerList(),
-    loadTags(),
-  ]);
-  // 現在の検索・フィルター状態を維持したまま一覧を再読み込みします。
-  const q = document.getElementById('search-input').value.trim();
   // 削除したタグがアクティブフィルターだった場合は解除します。
   if (activeTag === name) activeTag = null;
+  // フィルターチップに使ったタグ一覧を管理画面でも再利用します。
+  await renderTagManagerList(loadTags());
+  const q = document.getElementById('search-input').value.trim();
   loadBookmarks(q, activeTag, currentPage);
 }
 
@@ -827,6 +829,26 @@ document.getElementById('bookmark-form').addEventListener('submit', async (e) =>
 
 // ===== タグオートコンプリート =====
 
+async function findOrCreateTag(name) {
+  const lowerName = name.toLowerCase();
+  const existing = allTags.find(t => t.name.toLowerCase() === lowerName);
+  if (existing) return existing;
+
+  const res = await apiFetch('/api/tags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res) return null;
+  if (!res.ok) {
+    alert('タグの作成に失敗しました');
+    return null;
+  }
+  const tag = await res.json();
+  allTags.push(tag);
+  return tag;
+}
+
 function setupTagInput() {
   if (tagInputInitialized) return;
   tagInputInitialized = true;
@@ -855,27 +877,8 @@ function setupTagInput() {
       return;
     }
 
-    // allTags に同名のタグがあれば選択、なければ新規作成します。
-    const existing = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
-    if (existing) {
-      selectTag(existing.id, existing.name);
-    } else {
-      // POST /api/tags で新規タグを作成します。
-      const res = await apiFetch('/api/tags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      if (!res) return; // セッション切れ
-      if (!res.ok) {
-        alert('タグの作成に失敗しました');
-        return;
-      }
-      const newTag = await res.json();
-      // 作成したタグを allTags にも追加して次回以降の候補に出るようにします。
-      allTags.push(newTag);
-      selectTag(newTag.id, newTag.name);
-    }
+    const tag = await findOrCreateTag(name);
+    if (tag) selectTag(tag.id, tag.name);
   });
 
   // モーダル外をクリックしたらドロップダウンを閉じます。
@@ -1021,7 +1024,7 @@ function renderBulkTagList(query) {
   }
 
   let html = filtered.map(t =>
-    `<div class="bulk-tag-item" onclick="bulkAddTag(${t.id}, null)">${escapeHtml(t.name)}</div>`
+    `<div class="bulk-tag-item" onclick="bulkAddTag(${t.id})">${escapeHtml(t.name)}</div>`
   ).join('');
 
   // 完全一致するタグがなければ「Enterで新規作成」のヒントを出します。
@@ -1057,21 +1060,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const name = input.value.trim();
     if (!name) return;
 
-    const existing = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
-    if (existing) {
-      await bulkAddTag(existing.id, null);
-    } else {
-      const res = await apiFetch('/api/tags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      if (!res) return; // セッション切れ
-      if (!res.ok) { alert('タグの作成に失敗しました'); return; }
-      const newTag = await res.json();
-      allTags.push(newTag);
-      await bulkAddTag(newTag.id, null);
-    }
+    const tag = await findOrCreateTag(name);
+    if (tag) await bulkAddTag(tag.id);
   });
 });
 
@@ -1161,7 +1151,7 @@ document.addEventListener('click', (e) => {
 });
 
 // 選択中の全ブックマークに指定タグを一括付与します。
-async function bulkAddTag(tagId, _unused) {
+async function bulkAddTag(tagId) {
   closeBulkTagDropdown();
 
   const res = await apiFetch('/api/bookmarks/bulk/tags', {

@@ -6,29 +6,34 @@ package main
 import (
 	"database/sql"  // handleGetTags で *sql.Rows を明示的に使うパッケージ
 	"encoding/json" // レスポンスをJSON形式で返すパッケージ
-	"fmt"           // IN句のプレースホルダー生成・エラーメッセージに使うパッケージ
-	"net/http"      // HTTPハンドラ・エラーレスポンスに使うパッケージ
-	"strconv"       // URLパスのID文字列を整数に変換するパッケージ
-	"strings"       // IN句のプレースホルダー文字列組み立てに使うパッケージ
+	"errors"
+	"fmt"      // IN句のプレースホルダー生成・エラーメッセージに使うパッケージ
+	"net/http" // HTTPハンドラ・エラーレスポンスに使うパッケージ
+	"strconv"  // URLパスのID文字列を整数に変換するパッケージ
+	"strings"  // IN句のプレースホルダー文字列組み立てに使うパッケージ
 )
 
-// handleBulkAddTags：複数のブックマークに複数のタグをまとめて付与するAPIです。
-// リクエストボディ: {"bookmark_ids": [1,2,3], "tag_ids": [10,11]}
-// すでに紐付いているものは INSERT OR IGNORE でスキップします。
-func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		BookmarkIDs []int `json:"bookmark_ids"`
-		TagIDs      []int `json:"tag_ids"`
-	}
+type bulkTagRequest struct {
+	BookmarkIDs []int `json:"bookmark_ids"`
+	TagIDs      []int `json:"tag_ids"`
+}
+
+func decodeBulkTagRequest(w http.ResponseWriter, r *http.Request) (bulkTagRequest, error) {
+	var req bulkTagRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
-		return
+		return req, errors.New("bookmark_ids と tag_ids が必要です")
 	}
 	if err := validateBulkIDs(req.BookmarkIDs, "bookmark_ids"); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return req, err
 	}
-	if err := validateBulkIDs(req.TagIDs, "tag_ids"); err != nil {
+	return req, validateBulkIDs(req.TagIDs, "tag_ids")
+}
+
+// handleBulkAddTags：複数のブックマークに複数のタグをまとめて付与するAPIです。
+// すでに紐付いているものは INSERT OR IGNORE でスキップします。
+func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
+	req, err := decodeBulkTagRequest(w, r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -86,21 +91,9 @@ func handleBulkAddTags(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBulkRemoveTags：複数のブックマークから複数のタグをまとめて削除するAPIです。
-// リクエストボディ: {"bookmark_ids": [1,2,3], "tag_ids": [10,11]}
 func handleBulkRemoveTags(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		BookmarkIDs []int `json:"bookmark_ids"`
-		TagIDs      []int `json:"tag_ids"`
-	}
-	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "bookmark_ids と tag_ids が必要です", http.StatusBadRequest)
-		return
-	}
-	if err := validateBulkIDs(req.BookmarkIDs, "bookmark_ids"); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateBulkIDs(req.TagIDs, "tag_ids"); err != nil {
+	req, err := decodeBulkTagRequest(w, r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -121,7 +114,7 @@ func handleBulkRemoveTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// bookmark_id と tag_id の両方が一致する行をまとめて削除します。
-	_, err := db.Exec(
+	_, err = db.Exec(
 		fmt.Sprintf(
 			"DELETE FROM bookmark_tags WHERE bookmark_id IN (%s) AND tag_id IN (%s)",
 			bPlaceholders, tPlaceholders,

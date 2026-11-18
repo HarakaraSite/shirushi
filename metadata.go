@@ -92,13 +92,13 @@ func fetchMetadata(url string) (*Metadata, error) {
 
 	meta := &Metadata{}
 	// OGタグを優先し、なければ通常のメタタグ・titleタグを使います。
-	meta.Title = firstNonEmpty(extractOGTag(html, "og:title"), extractTitle(html))
-	meta.Excerpt = firstNonEmpty(extractOGTag(html, "og:description"), extractMetaTag(html, "description"))
-	meta.Author = firstNonEmpty(extractOGTag(html, "og:author"), extractMetaTag(html, "author"))
+	meta.Title = firstNonEmpty(extractMetaContent(html, "property", "og:title"), extractTitle(html))
+	meta.Excerpt = firstNonEmpty(extractMetaContent(html, "property", "og:description"), extractMetaContent(html, "name", "description"))
+	meta.Author = firstNonEmpty(extractMetaContent(html, "property", "og:author"), extractMetaContent(html, "name", "author"))
 	// og:image は相対URLで返すサイトがあるため、リクエスト先URLを基準に絶対URL化します。
 	// 例: "/og.png" → "https://example.com/og.png"
 	// http/https 以外（data: URI 等）は保存しません。
-	if raw := extractOGTag(html, "og:image"); raw != "" {
+	if raw := extractMetaContent(html, "property", "og:image"); raw != "" {
 		if abs, err := responseURL.Parse(raw); err == nil &&
 			(abs.Scheme == "http" || abs.Scheme == "https") {
 			meta.ImageURL = abs.String()
@@ -182,28 +182,14 @@ func extractTitle(html string) string {
 	return ""
 }
 
-// extractOGTag：Open Graph プロトコルのメタタグから content を取り出します。
-// <meta property="og:title" content="..."> のような形式を対象にします。
-func extractOGTag(html, property string) string {
-	// property と content の順序が逆でも対応できるよう2パターン用意します。
+// extractMetaContent は property または name でメタタグを選び、content を取り出します。
+func extractMetaContent(html, attribute, value string) string {
+	key := regexp.QuoteMeta(attribute) + `=["']` + regexp.QuoteMeta(value) + `["']`
+	content := `content=["']([^"']+)["']`
+	// 属性と content のどちらが先に書かれていても取得する。
 	patterns := []string{
-		`(?i)<meta[^>]*property=["\']` + regexp.QuoteMeta(property) + `["\'][^>]*content=["\']([^"\']+)["\']`,
-		`(?i)<meta[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']` + regexp.QuoteMeta(property) + `["\']`,
-	}
-	for _, p := range patterns {
-		re := regexp.MustCompile(p)
-		if m := re.FindStringSubmatch(html); len(m) > 1 {
-			return strings.TrimSpace(m[1])
-		}
-	}
-	return ""
-}
-
-// extractMetaTag：通常の <meta name="..." content="..."> からcontent を取り出します。
-func extractMetaTag(html, name string) string {
-	patterns := []string{
-		`(?i)<meta[^>]*name=["\']` + regexp.QuoteMeta(name) + `["\'][^>]*content=["\']([^"\']+)["\']`,
-		`(?i)<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']` + regexp.QuoteMeta(name) + `["\']`,
+		`(?i)<meta[^>]*` + key + `[^>]*` + content,
+		`(?i)<meta[^>]*` + content + `[^>]*` + key,
 	}
 	for _, p := range patterns {
 		re := regexp.MustCompile(p)
