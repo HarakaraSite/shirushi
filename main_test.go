@@ -242,6 +242,48 @@ func TestHandleGetBookmarks_WithData(t *testing.T) {
 	if resp.Bookmarks[0].Title != "テスト" {
 		t.Errorf("タイトルが違います: got %s, want テスト", resp.Bookmarks[0].Title)
 	}
+	if resp.Bookmarks[0].Tags == nil {
+		t.Error("タグなしのブックマークには空配列を返してください")
+	}
+}
+
+func TestHandleGetBookmarks_TagFilterKeepsTotalAndPage(t *testing.T) {
+	setupTestDB(t)
+	first := createTestBookmark(t, "https://example.com/first")
+	second := createTestBookmark(t, "https://example.com/second")
+	createTestBookmark(t, "https://example.com/untagged")
+	goTag := createTestTag(t, "Go")
+	otherTag := createTestTag(t, "SQLite")
+	if _, err := db.Exec(`INSERT INTO bookmark_tags VALUES (?, ?), (?, ?), (?, ?)`, first, goTag, first, otherTag, second, goTag); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE bookmarks SET image_url = ? WHERE id = ?`, "https://example.com/og.png", first); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	handleGetBookmarks(w, httptest.NewRequest(http.MethodGet, "/api/bookmarks?tag=Go&limit=1&page=2", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("一覧取得の応答 = %d, body = %s", w.Code, w.Body)
+	}
+	var resp BookmarkListResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Total != 2 || len(resp.Bookmarks) != 1 {
+		t.Fatalf("総件数または2ページ目の件数が不正です: %+v", resp)
+	}
+	got := resp.Bookmarks[0]
+	if got.ID != first || len(got.Tags) != 2 || got.Tags[0].ID != goTag || got.Tags[1].ID != otherTag {
+		t.Fatalf("2ページ目のブックマークまたはタグが不正です: %+v", got)
+	}
+	detail, err := getBookmarkByID(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ThumbnailURL == "" || got.ThumbnailURL != detail.ThumbnailURL {
+		t.Fatalf("一覧と詳細のサムネイルURLが違います: %q, %q", got.ThumbnailURL, detail.ThumbnailURL)
+	}
 }
 
 // TestHandleBookmark404CheckAsync：開始APIが即座に202を返し、backgroundで更新することを確認します。
@@ -1372,6 +1414,28 @@ func TestFetchMetadata_RejectsNonHTML(t *testing.T) {
 
 	if _, err := fetchMetadata(server.URL); err == nil {
 		t.Fatal("HTMLではないレスポンスなのにエラーになっていません")
+	}
+}
+
+func TestFetchMetadata_ReadsOpenGraphAndNamedTags(t *testing.T) {
+	t.Setenv("SHIRUSHI_ALLOW_PRIVATE_FETCH", "1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<title>Fallback title</title>
+			<meta content="OG title" property="og:title">
+			<meta name='description' content='Description'>
+			<meta content="Author" name="author">
+			<meta property="og:image" content="/og.png">`)
+	}))
+	defer server.Close()
+
+	got, err := fetchMetadata(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Metadata{Title: "OG title", Excerpt: "Description", Author: "Author", ImageURL: server.URL + "/og.png"}
+	if *got != want {
+		t.Fatalf("メタデータ = %+v, want %+v", *got, want)
 	}
 }
 

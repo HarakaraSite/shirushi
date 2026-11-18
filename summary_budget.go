@@ -40,17 +40,3 @@ func summaryUnicodeLimit(sourceBudgetBytes int) int {
 	}
 	return min(summarySourceMaxChars, sourceBudgetBytes/utf8.UTFMax)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

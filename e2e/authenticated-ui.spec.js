@@ -41,6 +41,8 @@ async function installAuthenticatedFixtures(page, options = {}) {
     requests = [],
     fulfillMutations = false,
   } = options;
+  const createdTags = [];
+  const deletedTagIds = new Set();
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -57,6 +59,18 @@ async function installAuthenticatedFixtures(page, options = {}) {
 
       if (!fulfillMutations) {
         throw new Error(`想定外のmutation request: ${method} ${url.pathname}`);
+      }
+      if (url.pathname === '/api/tags' && method === 'POST') {
+        const tag = { id: 100 + createdTags.length, name: body.name };
+        createdTags.push(tag);
+        await route.fulfill({ status: 201, json: tag });
+        return;
+      }
+      const tagMatch = url.pathname.match(/^\/api\/tags\/(\d+)$/);
+      if (tagMatch && method === 'DELETE') {
+        deletedTagIds.add(Number(tagMatch[1]));
+        await route.fulfill({ status: 204 });
+        return;
       }
       if (url.pathname === '/api/import' && method === 'POST') {
         await route.fulfill({ json: { imported: 1, skipped: 0 } });
@@ -84,7 +98,8 @@ async function installAuthenticatedFixtures(page, options = {}) {
       return;
     }
     if (url.pathname === '/api/tags') {
-      await route.fulfill({ json: url.searchParams.get('all') === '1' ? allTags : tags });
+      const listed = url.searchParams.get('all') === '1' ? [...allTags, ...createdTags] : tags;
+      await route.fulfill({ json: listed.filter(tag => !deletedTagIds.has(tag.id)) });
       return;
     }
     if (url.pathname === '/api/bookmarks') {
@@ -257,8 +272,11 @@ test('独自CSSの読込とキーボード状態を維持する', async ({ page 
 
 test('編集・タグ候補・タグ管理を操作する', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
+  const requests = [];
   const errors = await openAuthenticatedUI(page, {
     allTags: [...tags, { id: 13, name: '未使用' }],
+    requests,
+    fulfillMutations: true,
   });
 
   await page.locator('.edit-btn').first().click();
@@ -276,12 +294,33 @@ test('編集・タグ候補・タグ管理を操作する', async ({ page }) => 
   await expect(page.locator('#tag-dropdown')).toBeVisible();
   await page.locator('#tag-dropdown .tag-dropdown-item').filter({ hasText: '資料' }).click();
   await expect(page.locator('.tag-selected-badge')).toHaveCount(2);
+  await page.locator('#tag-input').fill('調査');
+  await page.locator('#tag-input').press('Enter');
+  await expect(page.locator('.tag-selected-badge')).toHaveCount(3);
+  expect(requests.find(request => request.method === 'POST' && request.pathname === '/api/tags')?.body).toEqual({ name: '調査' });
   await page.getByRole('button', { name: 'キャンセル' }).click();
 
+  const filter = page.locator('#tag-filter-area').getByText('資料', { exact: true });
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).searchParams.get('tag') === '資料'),
+    filter.click(),
+  ]);
   await page.getByRole('button', { name: 'タグ管理' }).click();
   await expect(page.locator('#tag-manager-overlay')).toHaveClass(/open/);
+  await expect(page.locator('.tag-manager-item')).toHaveCount(4);
+  await expect(page.locator('.tag-manager-item.unused').getByText('未使用 (未使用)', { exact: true })).toBeVisible();
+
+  requests.length = 0;
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('.tag-manager-item').filter({ hasText: '資料' }).getByRole('button', { name: '削除' }).click();
   await expect(page.locator('.tag-manager-item')).toHaveCount(3);
-  await expect(page.locator('.tag-manager-item.unused')).toContainText('未使用 (未使用)');
+  await expect(filter).toHaveCount(0);
+  await expect.poll(() => requests.find(
+    request => request.method === 'GET' && request.pathname === '/api/bookmarks',
+  )?.search).toBe('?limit=50');
+  expect(requests.filter(request => request.method === 'GET' && request.pathname === '/api/tags')
+    .map(request => request.search).sort()).toEqual(['', '?all=1']);
+
   await page.getByRole('button', { name: '閉じる' }).click();
   await expect(page.locator('#tag-manager-overlay')).not.toHaveClass(/open/);
   await expectNoBrowserErrors(errors);
@@ -321,11 +360,13 @@ test('バルク操作・import・export・paginationを操作する', async ({ p
 
   await page.locator('.bookmark-checkbox').first().check();
   await page.getByRole('button', { name: '＋ タグを追加' }).click();
-  await page.locator('#bulk-tag-list .bulk-tag-item').filter({ hasText: 'Go' }).click();
+  await page.locator('#bulk-tag-input').fill('gO');
+  await page.locator('#bulk-tag-input').press('Enter');
   await expect.poll(() => requests.find(
     (request) => request.method === 'POST'
       && request.pathname === '/api/bookmarks/bulk/tags',
   )?.body).toEqual({ bookmark_ids: [101], tag_ids: [11] });
+  expect(requests.some(request => request.method === 'POST' && request.pathname === '/api/tags')).toBe(false);
 
   await page.getByRole('button', { name: '－ タグを削除' }).click();
   await page.locator('#bulk-tag-remove-list .bulk-tag-item').filter({ hasText: 'Go' }).click();

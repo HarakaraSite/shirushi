@@ -67,8 +67,7 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 		conditions = append(conditions,
 			"NOT EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)")
 	} else if tag != "" {
-		// INNER JOIN でタグに紐付くブックマークだけに絞ります。
-		// DISTINCT は JOIN で行が増えても重複カウントしないために必要です。
+		// タグ名とブックマーク・タグの組が一意なので、結合後も1ブックマークにつき1行です。
 		fromClause += " INNER JOIN bookmark_tags bt ON b.id = bt.bookmark_id" +
 			" INNER JOIN tags t ON t.id = bt.tag_id"
 		conditions = append(conditions, "t.name = ?")
@@ -130,8 +129,7 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── ① 総件数を取得 ──────────────────────────────────────────
-	// DISTINCT b.id：タグJOINで行が増えても重複カウントを防ぎます。
-	countSQL := fmt.Sprintf("SELECT COUNT(DISTINCT b.id) %s %s", fromClause, whereClause)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) %s %s", fromClause, whereClause)
 	var total int
 	if err := db.QueryRow(countSQL, args...).Scan(&total); err != nil {
 		http.Error(w, "件数取得エラー", http.StatusInternalServerError)
@@ -139,13 +137,11 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── ② ブックマークをページ単位で取得 ─────────────────────────
-	// DISTINCT：タグJOINで同じブックマークが複数行になるのを防ぎます。
 	dataSQL := fmt.Sprintf(`
-		SELECT DISTINCT b.id, b.url, b.title, b.excerpt, b.author,
-		       b.public, b.has_content, b.image_url, b.created_at, b.modified_at
+		SELECT %s
 		%s %s
 		ORDER BY b.id DESC
-		LIMIT ? OFFSET ?`, fromClause, whereClause)
+		LIMIT ? OFFSET ?`, bookmarkColumns, fromClause, whereClause)
 
 	// LIMIT / OFFSET は args の後ろに追加します。
 	dataArgs := append(args, limit, offset)
@@ -157,13 +153,10 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 
 	// rowsが開いたまま別のクエリを実行するとSQLiteでエラーになることがあるため、
 	// まず全ブックマークをスライスに読み出してからrowsを閉じます。
-	var bookmarks []Bookmark
+	bookmarks := []Bookmark{}
 	for rows.Next() {
-		var b Bookmark
-		if err := rows.Scan(
-			&b.ID, &b.URL, &b.Title, &b.Excerpt, &b.Author,
-			&b.Public, &b.HasContent, &b.ImageURL, &b.CreatedAt, &b.ModifiedAt,
-		); err != nil {
+		b, err := scanBookmark(rows)
+		if err != nil {
 			rows.Close()
 			http.Error(w, "読み取りエラー", http.StatusInternalServerError)
 			return
@@ -172,34 +165,25 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	// ── ③ タグを2クエリ固定で一括取得 ───────────────────────────
+	// ── ③ タグを一括取得 ───────────────────────────────────────
 	// N+1クエリ問題を避けるため、対象ブックマークのIDをまとめてINで渡します。
 	if len(bookmarks) > 0 {
-		ids := make([]int, len(bookmarks))
-		for i, b := range bookmarks {
-			ids[i] = b.ID
-		}
-
-		// map[bookmarkID] = bookmarksスライスの添字（O(1) で位置を引くため）
 		idxByID := make(map[int]int, len(bookmarks))
+		tagArgs := make([]any, len(bookmarks))
 		for i, b := range bookmarks {
 			idxByID[b.ID] = i
+			tagArgs[i] = b.ID
 		}
 
-		placeholders := strings.Repeat("?,", len(ids))
+		placeholders := strings.Repeat("?,", len(tagArgs))
 		placeholders = placeholders[:len(placeholders)-1]
-
-		args := make([]interface{}, len(ids))
-		for i, id := range ids {
-			args[i] = id
-		}
 
 		tagRows, err := db.Query(fmt.Sprintf(`
 			SELECT bt.bookmark_id, t.id, t.name
 			FROM tags t
 			INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
 			WHERE bt.bookmark_id IN (%s)
-			ORDER BY t.name ASC`, placeholders), args...)
+			ORDER BY t.name ASC`, placeholders), tagArgs...)
 		if err != nil {
 			http.Error(w, "タグ取得エラー", http.StatusInternalServerError)
 			return
@@ -217,19 +201,6 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 				bookmarks[idx].Tags = append(bookmarks[idx].Tags, tag)
 			}
 		}
-	}
-
-	// 各ブックマークの Tags フィールドが nil（タグ0件）の場合も
-	// JSON で null ではなく [] を返すために初期化します。
-	// bookmarks スライス自体の nil ガードもあわせて行います。
-	for i := range bookmarks {
-		bookmarks[i].ThumbnailURL = bookmarkThumbnailURL(bookmarks[i].ID, bookmarks[i].ImageURL)
-		if bookmarks[i].Tags == nil {
-			bookmarks[i].Tags = []Tag{}
-		}
-	}
-	if bookmarks == nil {
-		bookmarks = []Bookmark{}
 	}
 
 	// ── ④ レスポンス ─────────────────────────────────────────────
@@ -353,20 +324,29 @@ func getTagsByBookmarkID(bookmarkID int) ([]Tag, error) {
 	return tags, nil
 }
 
+const bookmarkColumns = `b.id, b.url, b.title, b.excerpt, b.author,
+	b.public, b.has_content, b.image_url, b.created_at, b.modified_at`
+
+func scanBookmark(row interface{ Scan(...any) error }) (Bookmark, error) {
+	var b Bookmark
+	if err := row.Scan(
+		&b.ID, &b.URL, &b.Title, &b.Excerpt, &b.Author,
+		&b.Public, &b.HasContent, &b.ImageURL, &b.CreatedAt, &b.ModifiedAt,
+	); err != nil {
+		return Bookmark{}, err
+	}
+	b.ThumbnailURL = bookmarkThumbnailURL(b.ID, b.ImageURL)
+	b.Tags = []Tag{}
+	return b, nil
+}
+
 // getBookmarkByID：指定したIDのブックマークをタグ込みでDBから取得するヘルパー関数です。
 // 作成・更新APIのレスポンスに使います。INSERT/UPDATE のあとDBから読み直すことで、
 // created_at / modified_at に「DBに実際に保存された値」を正確に返せます。
 // （Go側で time.Now() をセットすると、DBの CURRENT_TIMESTAMP（UTC）と
 // 　タイムゾーンや秒数がズレた「嘘の値」を返してしまうため）
 func getBookmarkByID(id int) (*Bookmark, error) {
-	var b Bookmark
-	err := db.QueryRow(`
-		SELECT id, url, title, excerpt, author,
-		       public, has_content, image_url, created_at, modified_at
-		FROM bookmarks WHERE id = ?`, id).Scan(
-		&b.ID, &b.URL, &b.Title, &b.Excerpt, &b.Author,
-		&b.Public, &b.HasContent, &b.ImageURL, &b.CreatedAt, &b.ModifiedAt,
-	)
+	b, err := scanBookmark(db.QueryRow("SELECT "+bookmarkColumns+" FROM bookmarks b WHERE b.id = ?", id))
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +355,6 @@ func getBookmarkByID(id int) (*Bookmark, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.ThumbnailURL = bookmarkThumbnailURL(b.ID, b.ImageURL)
 	return &b, nil
 }
 

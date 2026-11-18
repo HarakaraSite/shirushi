@@ -2,6 +2,22 @@
 
 日本語版: [CHANGELOG.ja.md](CHANGELOG.ja.md)
 
+## 1.4.0
+
+### Added
+
+- Resize bookmark thumbnails to JPEGs with a maximum dimension of 640 pixels and cache them on the server.
+  Thumbnails for existing bookmarks are generated as they are displayed.
+
+### Changed
+
+- Share the list of in-use tags between tag management and the filters after a tag is deleted.
+- Updated the SQLite driver to `modernc.org/sqlite` v1.62.0 (SQLite 3.54.1) and Playwright for browser tests to 1.65.1.
+
+### Upgrade notes
+
+- Keep using your existing `shirushi.db`. Resized images are saved in `thumbnail-cache/` under the server's working directory.
+
 ## 1.3.1
 
 ### Fixed
