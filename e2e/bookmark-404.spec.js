@@ -29,15 +29,43 @@ test('404チェックの進捗とサムネイル更新を完了まで表示す�
     const response = await fetch('/api/bookmarks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, title: '404チェック Playwright fixture' }),
+      body: JSON.stringify({
+        url,
+        title: '404チェック Playwright fixture',
+        image_url: new URL('/thumbnail.png', url).href,
+      }),
     });
     if (!response.ok) throw new Error(`bookmark作成失敗: ${response.status}`);
     return response.json();
   }, fixtureURL);
 
-  await page.reload();
+  const thumbnailURL = new URL(bookmark.thumbnail_url, page.url()).href;
+  const [thumbnailResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url() === thumbnailURL),
+    page.reload(),
+  ]);
+  expect(thumbnailResponse.status()).toBe(200);
+  expect(thumbnailResponse.headers()['content-type']).toBe('image/jpeg');
   const card = page.locator(`.bookmark-item[data-id="${bookmark.id}"]`);
   await expect(card).toBeVisible();
+  await expect(card.locator('.bookmark-thumb')).toHaveJSProperty('naturalWidth', 1);
+
+  const replacementPath = await page.evaluate(async ({ id, url, title, image_url }) => {
+    const replacement = new URL(image_url);
+    replacement.searchParams.set('revised', '1');
+    const response = await fetch(`/api/bookmarks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, title, image_url: replacement.href }),
+    });
+    if (!response.ok) throw new Error(`bookmark更新失敗: ${response.status}`);
+    const updated = await response.json();
+    await loadBookmarks();
+    return updated.thumbnail_url;
+  }, bookmark);
+  expect(replacementPath).not.toBe(bookmark.thumbnail_url);
+  await expect(card.locator('.bookmark-thumb')).toHaveAttribute('src', replacementPath);
+  await expect(card.locator('.bookmark-thumb')).toHaveJSProperty('naturalWidth', 1);
 
   let resolveCompletion;
   const completionDialog = new Promise((resolve) => { resolveCompletion = resolve; });

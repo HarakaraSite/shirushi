@@ -81,6 +81,7 @@ func main() {
 	createTable()
 	// 4. 既存DBに新しいカラムを追加するマイグレーションを実行します。
 	runMigrations()
+	bookmarkThumbnails = newThumbnailCache(thumbnailCacheDir, newSafeHTTPClient())
 	// 5. APIのルート（住所）と、それぞれの処理（関数）を紐付けます。
 	// Go 1.22からの新機能で、"GET /..." のようにHTTPメソッドを指定できます。
 
@@ -94,6 +95,7 @@ func main() {
 	// GoのServeMuxは固定パスを {id} より優先して選ぶため、両方を安全に共存させられます。
 	http.HandleFunc("GET /api/bookmarks/by-url", handleGetBookmarkByURL)
 	http.HandleFunc("GET /api/bookmarks/{id}", handleGetBookmark)
+	http.HandleFunc("GET /api/bookmarks/{id}/thumbnail", bookmarkThumbnails.serve)
 	http.HandleFunc("POST /api/bookmarks", handleCreateBookmark)
 	http.HandleFunc("PUT /api/bookmarks/{id}", handleUpdateBookmark)
 	http.HandleFunc("DELETE /api/bookmarks/{id}", handleDeleteBookmark)

@@ -14,17 +14,18 @@ import (
 // Shioriのスキーマに合わせたフィールド構成になっています。
 // `json:"..."` という記述（タグ）は、JSON形式にする際の名前を指定しています。
 type Bookmark struct {
-	ID         int        `json:"id"`
-	URL        string     `json:"url"`
-	Title      string     `json:"title"`
-	Excerpt    string     `json:"excerpt"`     // 本文の抜粋・メモ欄
-	Author     string     `json:"author"`      // ページの著者
-	Public     int        `json:"public"`      // 公開フラグ（0:非公開 1:公開）
-	HasContent bool       `json:"has_content"` // 本文キャッシュの有無
-	ImageURL   string     `json:"image_url"`   // サムネイル画像URL
-	CreatedAt  time.Time  `json:"created_at"`
-	ModifiedAt *time.Time `json:"modified_at"` // 最終更新日時（未更新の場合はnull）
-	Tags       []Tag      `json:"tags"`        // 紐付いているタグの一覧
+	ID           int        `json:"id"`
+	URL          string     `json:"url"`
+	Title        string     `json:"title"`
+	Excerpt      string     `json:"excerpt"`                 // 本文の抜粋・メモ欄
+	Author       string     `json:"author"`                  // ページの著者
+	Public       int        `json:"public"`                  // 公開フラグ（0:非公開 1:公開）
+	HasContent   bool       `json:"has_content"`             // 本文キャッシュの有無
+	ImageURL     string     `json:"image_url"`               // サムネイル画像URL
+	ThumbnailURL string     `json:"thumbnail_url,omitempty"` // 画像URLから生成する縮小画像の配信先
+	CreatedAt    time.Time  `json:"created_at"`
+	ModifiedAt   *time.Time `json:"modified_at"` // 最終更新日時（未更新の場合はnull）
+	Tags         []Tag      `json:"tags"`        // 紐付いているタグの一覧
 }
 
 // Tag 構造体：タグのデータをプログラム内で扱うための入れ物です。

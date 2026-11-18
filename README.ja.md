@@ -44,7 +44,7 @@ go build -o shirushi .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o shirushi .
 ```
 
-Go 1.26.4 以上が必要です。依存ライブラリは `modernc.org/sqlite`（CGO 不要の純粋 Go 実装）のみです。
+Go 1.26.4 以上が必要です。SQLite には `modernc.org/sqlite`、サムネイルの縮小には `golang.org/x/image` を使います。どちらも CGO は不要です。
 
 ---
 
@@ -129,6 +129,9 @@ SHIRUSHI_TRUSTED_PROXIES='<Caddy LXC の LAN IP>' \
 ## バックアップとリストア
 
 データベースは実行ファイルと同じディレクトリの `shirushi.db` に保存されます。
+
+縮小サムネイルは起動時の作業ディレクトリにある `thumbnail-cache/` に保存します。
+既存のブックマークは一覧で表示する際に生成し、キャッシュを削除した場合も再生成できます。
 
 ```bash
 # バックアップ（サーバー停止不要。WAL モードのため安全にコピーできます）

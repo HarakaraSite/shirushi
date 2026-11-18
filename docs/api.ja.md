@@ -4,7 +4,7 @@ English version: [api.md](api.md)
 
 ベース URL: `http://localhost:8181`（`SHIRUSHI_ADDR` で変更可）
 
-すべての API は JSON を返します（`Content-Type: application/json`）。
+一覧や詳細などのデータ API は JSON を返します（`Content-Type: application/json`）。
 `/api/login` と `/api/logout` 以外は認証が必要です。
 未認証リクエストには `401 Unauthorized` を返します。
 
@@ -140,6 +140,8 @@ GET /api/bookmarks
 
 `total` は絞り込み条件込みの総件数です。ページネーションのページ数計算に使います。
 タグなしのブックマークは `"tags": []` になります（`null` にはなりません）。
+`thumbnail_url` がある場合は、認証付きで縮小 JPEG を取得できるパスです。縮小できない場合は元画像へリダイレクトします。
+`image_url` には元の画像 URL が入ります。
 
 ---
 
