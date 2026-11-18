@@ -434,7 +434,7 @@ async function loadBookmarks(q = '', tag = null, page = 1, preloadedRes = null) 
         <a href="${escapeHtml(safeHref(b.url))}" target="_blank" rel="noopener">
           <img
             class="bookmark-thumb"
-            src="${b.image_url ? escapeHtml(b.image_url) : THUMB_PLACEHOLDER}"
+            src="${escapeHtml(b.thumbnail_url || b.image_url) || THUMB_PLACEHOLDER}"
             alt=""
             loading="lazy"
             onerror="this.src=THUMB_PLACEHOLDER"

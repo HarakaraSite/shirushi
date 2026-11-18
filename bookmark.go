@@ -223,6 +223,7 @@ func handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
 	// JSON で null ではなく [] を返すために初期化します。
 	// bookmarks スライス自体の nil ガードもあわせて行います。
 	for i := range bookmarks {
+		bookmarks[i].ThumbnailURL = bookmarkThumbnailURL(bookmarks[i].ID, bookmarks[i].ImageURL)
 		if bookmarks[i].Tags == nil {
 			bookmarks[i].Tags = []Tag{}
 		}
@@ -374,6 +375,7 @@ func getBookmarkByID(id int) (*Bookmark, error) {
 	if err != nil {
 		return nil, err
 	}
+	b.ThumbnailURL = bookmarkThumbnailURL(b.ID, b.ImageURL)
 	return &b, nil
 }
 
@@ -425,6 +427,7 @@ func handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "登録データ取得エラー", http.StatusInternalServerError)
 		return
 	}
+	bookmarkThumbnails.warm(created.ImageURL)
 
 	// 成功（201 Created）を返し、登録されたデータをJSONで返信します。
 	// ※ WriteHeader より前に Header().Set() を呼ぶ必要があります。

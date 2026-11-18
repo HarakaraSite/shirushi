@@ -46,8 +46,8 @@ go build -o shirushi .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o shirushi .
 ```
 
-Go 1.26.4 or later is required. The only dependency is
-`modernc.org/sqlite`, a pure-Go SQLite implementation that does not require CGO.
+Go 1.26.4 or later is required. Shirushi uses `modernc.org/sqlite` for SQLite and
+`golang.org/x/image` for thumbnail resizing. Both work without CGO.
 
 ---
 
@@ -135,6 +135,10 @@ values cause a startup error.
 ## Backup and restore
 
 The database is stored as `shirushi.db` in the same directory as the binary.
+
+Resized thumbnails are stored in `thumbnail-cache/` under the server's working
+directory. Thumbnails for existing bookmarks are generated as they are displayed
+and can be regenerated after clearing the cache.
 
 ```bash
 # Backup (the server does not need to be stopped)

@@ -5,6 +5,9 @@ shirushi.db.backup-*
 shirushi.db-wal
 shirushi.db-shm
 
+# サムネイルキャッシュ
+/thumbnail-cache/
+
 # ビルド済みバイナリ
 shirushi
 

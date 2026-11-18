@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:8181` (configurable with `SHIRUSHI_ADDR`)
 
-All API endpoints return JSON (`Content-Type: application/json`). Authentication
+Data endpoints such as the bookmark list return JSON (`Content-Type: application/json`). Authentication
 is required except for `/api/login` and `/api/logout`. Unauthenticated requests
 receive `401 Unauthorized`.
 
@@ -141,6 +141,9 @@ GET /api/bookmarks
 
 `total` is the total count after applying filters; use it to calculate the
 number of pagination pages. Untagged bookmarks have `"tags": []`, never `null`.
+When present, `thumbnail_url` is the authenticated path for fetching the resized
+JPEG. It redirects to the original if resizing fails. `image_url` contains the
+original image URL.
 
 ---
 
